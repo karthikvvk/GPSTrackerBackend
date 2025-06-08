@@ -38,17 +38,19 @@ def get_today_collection():
 @app.route('/send', methods=['POST'])
 def send_data():
     data = request.get_json()
-    if not data or not isinstance(data, list):
+    if not data or "firebaseid" not in data or "coords" not in data or not isinstance(data["coords"], list):
         return jsonify({"status": "error", "message": "Invalid payload"}), 400
+    firebaseid = data["firebaseid"]
+    coords = data["coords"]
 
     collection_name = datetime.now(timezone.utc).strftime("%Y_%m_%d")
     collection = mongo_db[collection_name]
-    history_collection = mongo_db["history"]
 
     valid_coords = []
-    for coord in data:
+    for coord in coords:  # Now iterating through data["coords"]
         if 'x_cord' in coord and 'y_cord' in coord:
             coord_doc = {
+                "firebaseid": firebaseid,  # Added this line
                 "x_cord": coord["x_cord"],
                 "y_cord": coord["y_cord"],
                 "logged_time": datetime.now(timezone.utc)
@@ -62,18 +64,12 @@ def send_data():
     if valid_coords:
         collection.insert_many(valid_coords)
 
-        # Ensure the date collection is registered in history
-        if not history_collection.find_one({"name": collection_name}):
-            history_collection.insert_one({"name": collection_name})
 
     return jsonify({
         "status": "success",
         "inserted": len(valid_coords),
         "track_active": track_active
     })
-
-
-
 
 @app.route('/sync', methods=['POST'])
 def sync_resume():
@@ -84,61 +80,84 @@ def sync_resume():
     try:
         # Handle 'Z' (Zulu/UTC) and convert to aware datetime
         last_ts = datetime.fromisoformat(data['last_synced_timestamp'].replace("Z", "+00:00"))
+        firebaseid = data["firebaseid"]  # <-- Added this line
+
     except Exception as e:
         return jsonify({"status": "error", "message": "Invalid timestamp format"}), 400
 
-    history_collection = mongo_db["history"]
-    date_docs = list(history_collection.find({}, {"_id": 0, "name": 1}))
-    all_dates = sorted([doc["name"] for doc in date_docs])
+
+
+    date_docs = list(mongo_db.list_collection_names())
+    date_docs.sort()
 
     # Include today as well
     today_str = get_today_collection()
-    if today_str not in all_dates:
-        all_dates.append(today_str)
+    if today_str not in date_docs:
+        date_docs.append(today_str)
 
     sync_data = []
     found = False
 
-    for date_str in all_dates:
+    for date_str in date_docs:
         collection = mongo_db[date_str]
+
+        # force collection create
+        if collection.estimated_document_count() == 0:
+            collection.insert_one({
+                "x_cord": 0,
+                "y_cord": 0,
+                "logged_time": datetime.now(timezone.utc),
+                "dummy": True,
+                "firebaseid": "firebaseid",
+            })
+
         if not found:
             # Search for the timestamp
-            match = collection.find_one({"logged_time": {"$gte": last_ts}}, sort=[("logged_time", 1)])
+            match = collection.find_one({"firebaseid": firebaseid,"logged_time": {"$gte": last_ts}}, sort=[("logged_time", 1)])
             if match:
                 found = True
                 # Now get all data from this timestamp onwards
-                cursor = collection.find({"logged_time": {"$gte": last_ts}}, {"_id": 0})
+                cursor = collection.find({"firebaseid": firebaseid,"logged_time": {"$gte": last_ts}}, {"_id": 0})
                 sync_data.extend(list(cursor))
         else:
             # Already found; get all data from the next collections
-            cursor = collection.find({}, {"_id": 0})
+            cursor = collection.find({"firebaseid": firebaseid}, {"_id": 0})
             sync_data.extend(list(cursor))
+
+        collection.delete_many({"dummy": True})
+
 
     return jsonify({"status": "success", "synced_data": sync_data})
 
-
 @app.route('/viewtoday', methods=['GET'])
 def view_today():
+    firebaseid = request.args.get("firebaseid")
+    if not firebaseid:
+        return jsonify({"status": "error", "message": "Missing firebaseid"}), 400
     collection_name = get_today_collection()
     collection = mongo_db[collection_name]
-    coords = list(collection.find({}, {'_id': 0}))
+    coords = list(collection.find({"firebaseid": firebaseid}, {'_id': 0}))
     return jsonify(coords)
 
 @app.route('/sync_all', methods=['GET'])
 def sync_all():
+    firebaseid = request.args.get("firebaseid")
+    if not firebaseid:
+        return jsonify({"status": "error", "message": "Missing firebaseid"}), 400
+
     try:
-        history_collection = mongo_db["history"]
-        date_docs = list(history_collection.find({}, {"_id": 0, "name": 1}))
-        all_dates = sorted([doc["name"] for doc in date_docs])
+        date_docs = list(mongo_db.list_collection_names())
+        date_docs.sort()
+
 
         # Also include today's collection if not in history
         today_str = get_today_collection()
-        if today_str not in all_dates:
-            all_dates.append(today_str)
+        if today_str not in date_docs:
+            date_docs.append(today_str)
 
         full_sync_data = []
 
-        for date_str in all_dates:
+        for date_str in date_docs:
             collection = mongo_db[date_str]
             cursor = collection.find({}, {"_id": 0})
             full_sync_data.extend(list(cursor))
@@ -148,12 +167,17 @@ def sync_all():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
 @app.route('/history', methods=['GET'])
 def history_dates():
-    history_collection = mongo_db["history"]
-    date_names = history_collection.find({}, {"_id": 0, "name": 1})
-    return jsonify({"available_dates": [d["name"] for d in date_names]})
+    firebaseid = request.args.get("firebaseid")
+    if not firebaseid:
+        return jsonify({"status": "error", "message": "Missing firebaseid"}), 400
+
+    user_dates = [
+        date_str for date_str in mongo_db.list_collection_names()
+        if mongo_db[date_str].count_documents({"firebaseid": firebaseid}) > 0  # <-- Added filter
+    ]
+    return jsonify({"available_dates": sorted(user_dates)})
 
 @app.route('/serverstatus', methods=['GET'])
 def get_server_status():
