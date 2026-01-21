@@ -1,0 +1,531 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:gpstracking/data/local_db.dart';
+import 'package:gpstracking/data/models.dart';
+import 'package:gpstracking/nav.dart';
+import 'package:gpstracking/services/background_service.dart';
+import 'package:gpstracking/services/location_service.dart';
+import 'package:gpstracking/state/app_session.dart';
+import 'package:gpstracking/theme.dart';
+import 'package:gpstracking/ui/app_widgets.dart';
+import 'package:provider/provider.dart';
+
+class DashboardPage extends StatefulWidget {
+  const DashboardPage({super.key});
+
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  LocationService? _locationService;
+  final List<String> _logs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _initBackupCount();
+  }
+
+  Future<void> _initBackupCount() async {
+    final count = await LocalDb.getBackupCount();
+    if (mounted) {
+      context.read<AppSession>().setBackupCount(count);
+    }
+  }
+
+  void _initLocationService(String userId) {
+    _locationService ??= LocationService(userId: userId)
+      ..onStatusUpdate = (msg) {
+        if (mounted) {
+          setState(() {
+            _logs.add(msg);
+            if (_logs.length > 50) _logs.removeAt(0);
+          });
+        }
+      }
+      ..onLocationUpdate = (log) {
+        if (mounted) {
+          context.read<AppSession>().updateLocation(log);
+        }
+      };
+  }
+
+  Future<void> _startTracking() async {
+    final session = context.read<AppSession>();
+    if (session.userId == null) return;
+
+    _initLocationService(session.userId!);
+    await _locationService!.startTracking();
+
+    // Start background service
+    await BackgroundService.startService(session.userId!);
+
+    session.setTrackingActive(true);
+    setState(() => _logs.add('🔄 Started tracking...'));
+  }
+
+  Future<void> _stopTracking() async {
+    _locationService?.stopTracking();
+    await BackgroundService.stopService();
+
+    context.read<AppSession>().setTrackingActive(false);
+    setState(() => _logs.add('⏹️ Stopped tracking'));
+  }
+
+  @override
+  void dispose() {
+    _locationService?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<AppSession>();
+
+    // Route to appropriate dashboard based on role
+    if (session.isKodomo) {
+      return _buildKodomoDashboard(context, session);
+    } else if (session.isKazoku) {
+      return _buildKazokuDashboard(context, session);
+    } else {
+      // Fallback - should not happen with proper routing
+      return _buildDefaultDashboard(context, session);
+    }
+  }
+
+  /// Kodomo Dashboard - for the person being tracked
+  Widget _buildKodomoDashboard(BuildContext context, AppSession session) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      child: ListView(
+        padding: AppSpacing.paddingLg,
+        children: [
+          Text(
+            'Kodomo Dashboard',
+            style: context.textStyles.headlineLarge
+                ?.copyWith(color: scheme.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Your location is ${session.trackingActive ? "being shared" : "not being shared"}',
+            style: context.textStyles.bodyMedium
+                ?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+
+          // Status card
+          GradientCard(
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: (session.trackingActive
+                            ? scheme.tertiary
+                            : scheme.outline)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: Icon(
+                    session.trackingActive
+                        ? Icons.wifi_tethering_rounded
+                        : Icons.wifi_tethering_off_rounded,
+                    color: session.trackingActive
+                        ? scheme.tertiary
+                        : scheme.outline,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        session.trackingActive ? 'Tracking Active' : 'Tracking Off',
+                        style: context.textStyles.titleMedium
+                            ?.copyWith(color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 2),
+                      if (session.lastLocation != null)
+                        Text(
+                          'Last: (${session.lastLocation!.xCord.toStringAsFixed(4)}, ${session.lastLocation!.yCord.toStringAsFixed(4)})',
+                          style: context.textStyles.bodyMedium
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        )
+                      else
+                        Text(
+                          'No location recorded yet',
+                          style: context.textStyles.bodyMedium
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                    ],
+                  ),
+                ),
+                if (session.backupCount > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: scheme.errorContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${session.backupCount} offline',
+                      style: context.textStyles.labelSmall
+                          ?.copyWith(color: scheme.onErrorContainer),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Tracking controls
+          Row(
+            children: [
+              Expanded(
+                child: PrimaryPillButton(
+                  label: session.trackingActive ? 'Stop' : 'Start',
+                  icon: session.trackingActive
+                      ? Icons.stop_rounded
+                      : Icons.play_arrow_rounded,
+                  onPressed:
+                      session.trackingActive ? _stopTracking : _startTracking,
+                ),
+              ),
+              if (session.trackingActive) ...[
+                const SizedBox(width: AppSpacing.md),
+                SubtleOutlineButton(
+                  label: 'Restart',
+                  icon: Icons.refresh_rounded,
+                  onPressed: () async {
+                    await _stopTracking();
+                    await Future.delayed(const Duration(milliseconds: 300));
+                    await _startTracking();
+                  },
+                ),
+              ],
+            ],
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Log output
+          if (_logs.isNotEmpty) ...[
+            Text(
+              'Activity Log',
+              style: context.textStyles.titleMedium
+                  ?.copyWith(color: scheme.onSurface),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              height: 200,
+              padding: AppSpacing.paddingMd,
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(color: scheme.outline.withValues(alpha: 0.16)),
+              ),
+              child: ListView.builder(
+                reverse: true,
+                itemCount: _logs.length,
+                itemBuilder: (context, index) {
+                  final log = _logs[_logs.length - 1 - index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      log,
+                      style: context.textStyles.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Kazoku Dashboard - for the person viewing others
+  Widget _buildKazokuDashboard(BuildContext context, AppSession session) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      child: ListView(
+        padding: AppSpacing.paddingLg,
+        children: [
+          Text(
+            'Kazoku Dashboard',
+            style: context.textStyles.headlineLarge
+                ?.copyWith(color: scheme.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'View locations of your family members',
+            style: context.textStyles.bodyMedium
+                ?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+
+          // View map card
+          GradientCard(
+            onTap: () => context.go(AppRoutes.liveMap),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: Icon(Icons.map_rounded, color: scheme.primary),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'View Live Map',
+                        style: context.textStyles.titleMedium
+                            ?.copyWith(color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'See real-time locations on the map',
+                        style: context.textStyles.bodyMedium
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Linked family members
+          Text(
+            'Family Members',
+            style: context.textStyles.titleLarge
+                ?.copyWith(color: scheme.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+
+          if (session.linkedChildren.isEmpty)
+            GradientCard(
+              onTap: () {
+                // TODO: Add child linking flow
+                _showAddChildDialog(context);
+              },
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: scheme.tertiary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child:
+                        Icon(Icons.person_add_rounded, color: scheme.tertiary),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Add Family Member',
+                          style: context.textStyles.titleMedium
+                              ?.copyWith(color: scheme.onSurface),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Link a family member to track their location',
+                          style: context.textStyles.bodyMedium
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: scheme.onSurfaceVariant),
+                ],
+              ),
+            )
+          else
+            ...session.linkedChildren.map((child) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _LinkedChildCard(child: child),
+                )),
+        ],
+      ),
+    );
+  }
+
+  void _showAddChildDialog(BuildContext context) {
+    final controller = TextEditingController();
+    final scheme = Theme.of(context).colorScheme;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Family Member'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'User ID or Email',
+            hintText: 'Enter their account ID',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: scheme.onSurfaceVariant)),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                context.read<AppSession>().addLinkedChild(
+                      LinkedChild(
+                        odemoId: controller.text.trim(),
+                        displayName: 'Family Member',
+                        email: '${controller.text.trim()}@example.com',
+                      ),
+                    );
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Default dashboard (fallback)
+  Widget _buildDefaultDashboard(BuildContext context, AppSession session) {
+    final scheme = Theme.of(context).colorScheme;
+    final subjectName = session.subjectName;
+
+    return SafeArea(
+      child: ListView(
+        padding: AppSpacing.paddingLg,
+        children: [
+          Text(
+            'Dashboard',
+            style: context.textStyles.headlineLarge
+                ?.copyWith(color: scheme.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Viewing: $subjectName',
+            style: context.textStyles.bodyMedium
+                ?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          GradientCard(
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.tertiary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: Icon(Icons.wifi_tethering_rounded, color: scheme.tertiary),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Live',
+                        style: context.textStyles.titleMedium
+                            ?.copyWith(color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Last update: just now • Location stream placeholder',
+                        style: context.textStyles.bodyMedium
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LinkedChildCard extends StatelessWidget {
+  const _LinkedChildCard({required this.child});
+
+  final LinkedChild child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: AppSpacing.paddingMd,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: scheme.outline.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: scheme.primary.withValues(alpha: 0.14),
+            child: Icon(Icons.person_rounded, color: scheme.primary),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  child.displayName,
+                  style: context.textStyles.titleMedium
+                      ?.copyWith(color: scheme.onSurface),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  child.lastLocation != null
+                      ? 'Last seen: ${child.lastLocation!.loggedTime}'
+                      : 'No location data yet',
+                  style: context.textStyles.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.more_vert_rounded, color: scheme.onSurfaceVariant),
+            onPressed: () {
+              // TODO: Show options menu
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
