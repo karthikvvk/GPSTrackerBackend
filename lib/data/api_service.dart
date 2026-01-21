@@ -4,7 +4,7 @@ import 'models.dart';
 
 /// HTTP client for GPS Tracker backend
 class ApiService {
-  static const String baseUrl = 'https://gpstrackerbackend-du04.onrender.com';
+  static const String baseUrl = 'http://10.134.74.182:5000';
 
   final http.Client _client;
 

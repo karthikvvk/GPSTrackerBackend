@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Email/Password authentication service using Python backend
 class AuthService {
-  static const String _baseUrl = 'https://gpstrackerbackend-du04.onrender.com';
+  static const String _baseUrl = 'http://10.134.74.182:5000';
   static const String _userIdKey = 'user_id';
   static const String _emailKey = 'user_email';
   static const String _displayNameKey = 'user_display_name';

@@ -18,12 +18,12 @@ dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']  # Use Google DNS
 
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = "mongodb+srv://vkarthik5002:Karthikjaihindjai@helix.hkjiw8w.mongodb.net/?appName=Helix"
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
-mongo_db = client["trackerDB"]
+mongo_db = client["GPSTracker"]
 
 # Users collection
-users_collection = mongo_db["users"]
+users_collection = mongo_db["ourusers"]
 
 app = Flask(__name__)
 CORS(app)

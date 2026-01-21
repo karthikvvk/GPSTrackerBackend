@@ -48,3 +48,4 @@ app.*.map.json
 *.hologram.dart
 dump/
 .vscode/
+virtual/
