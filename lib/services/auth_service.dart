@@ -1,10 +1,20 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/settings.dart';
 
 /// Email/Password authentication service using Python backend
 class AuthService {
-  static const String _baseUrl = 'http://10.134.74.182:5000';
+  static String? _baseUrl;
+  
+  static Future<String> get baseUrl async {
+    if (_baseUrl == null) {
+      final settings = await Settings.instance;
+      _baseUrl = settings.backendUrl;
+    }
+    return _baseUrl!;
+  }
+  
   static const String _userIdKey = 'user_id';
   static const String _emailKey = 'user_email';
   static const String _displayNameKey = 'user_display_name';
@@ -52,8 +62,9 @@ class AuthService {
     required String displayName,
   }) async {
     try {
+      final url = await baseUrl;
       final response = await _client.post(
-        Uri.parse('$_baseUrl/auth/register'),
+        Uri.parse('$url/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'email': email,
@@ -82,8 +93,9 @@ class AuthService {
     required String password,
   }) async {
     try {
+      final url = await baseUrl;
       final response = await _client.post(
-        Uri.parse('$_baseUrl/auth/login'),
+        Uri.parse('$url/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'email': email,
@@ -110,8 +122,9 @@ class AuthService {
     if (_userId == null) return;
 
     try {
+      final url = await baseUrl;
       final response = await _client.put(
-        Uri.parse('$_baseUrl/auth/profile'),
+        Uri.parse('$url/auth/profile'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'user_id': _userId,

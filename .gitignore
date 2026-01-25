@@ -49,3 +49,6 @@ app.*.map.json
 dump/
 .vscode/
 virtual/
+
+# Configuration (contains credentials)
+settings.json

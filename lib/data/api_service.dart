@@ -1,10 +1,19 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'models.dart';
+import '../utils/settings.dart';
 
 /// HTTP client for GPS Tracker backend
 class ApiService {
-  static const String baseUrl = 'http://10.134.74.182:5000';
+  static String? _baseUrl;
+  
+  static Future<String> get baseUrl async {
+    if (_baseUrl == null) {
+      final settings = await Settings.instance;
+      _baseUrl = settings.backendUrl;
+    }
+    return _baseUrl!;
+  }
 
   final http.Client _client;
 
@@ -17,8 +26,9 @@ class ApiService {
   /// Check if server is online
   Future<bool> checkServerStatus() async {
     try {
+      final url = await baseUrl;
       final response = await _client
-          .get(Uri.parse('$baseUrl/serverstatus'))
+          .get(Uri.parse('$url/serverstatus'))
           .timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
@@ -38,6 +48,7 @@ class ApiService {
   /// Send coordinates to server
   Future<bool> sendCoords(String userId, List<CoordinateLog> coords) async {
     try {
+      final url = await baseUrl;
       final body = jsonEncode({
         'userid': userId,
         'coords': coords.map((c) => c.toJson()).toList(),
@@ -45,7 +56,7 @@ class ApiService {
 
       final response = await _client
           .post(
-            Uri.parse('$baseUrl/send'),
+            Uri.parse('$url/send'),
             headers: {'Content-Type': 'application/json'},
             body: body,
           )
@@ -67,6 +78,7 @@ class ApiService {
     DateTime lastSync,
   ) async {
     try {
+      final url = await baseUrl;
       final body = jsonEncode({
         'userid': userId,
         'last_synced_timestamp': lastSync.toUtc().toIso8601String(),
@@ -74,7 +86,7 @@ class ApiService {
 
       final response = await _client
           .post(
-            Uri.parse('$baseUrl/sync'),
+            Uri.parse('$url/sync'),
             headers: {'Content-Type': 'application/json'},
             body: body,
           )
@@ -96,8 +108,9 @@ class ApiService {
   /// View today's coordinates for a user
   Future<List<CoordinateLog>> viewToday(String userId) async {
     try {
+      final url = await baseUrl;
       final response = await _client
-          .get(Uri.parse('$baseUrl/viewtoday?userid=$userId'))
+          .get(Uri.parse('$url/viewtoday?userid=$userId'))
           .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
@@ -115,8 +128,9 @@ class ApiService {
   /// Sync all data for a user
   Future<List<CoordinateLog>> syncAll(String userId) async {
     try {
+      final url = await baseUrl;
       final response = await _client
-          .get(Uri.parse('$baseUrl/sync_all?userid=$userId'))
+          .get(Uri.parse('$url/sync_all?userid=$userId'))
           .timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
@@ -135,8 +149,9 @@ class ApiService {
   /// Get available history dates for a user
   Future<List<String>> getHistory(String userId) async {
     try {
+      final url = await baseUrl;
       final response = await _client
-          .get(Uri.parse('$baseUrl/history?userid=$userId'))
+          .get(Uri.parse('$url/history?userid=$userId'))
           .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {

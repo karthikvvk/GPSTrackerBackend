@@ -4,23 +4,27 @@ from datetime import datetime, timezone
 from pymongo import MongoClient
 from flask_cors import CORS
 import queue
-from dotenv import load_dotenv
 import os
-from urllib.parse import quote_plus
+import json
 from pymongo.server_api import ServerApi
 import dns.resolver
 import bcrypt
 import uuid
 
-
+# Load settings from settings.json
+SETTINGS_PATH = os.path.join(os.path.dirname(__file__), 'settings.json')
+with open(SETTINGS_PATH, 'r') as f:
+    settings = json.load(f)
 
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
 dns.resolver.default_resolver.nameservers = ['8.8.8.8']  # Use Google DNS
 
-load_dotenv()
-MONGO_URI = "mongodb+srv://vkarthik5002:Karthikjaihindjai@helix.hkjiw8w.mongodb.net/?appName=Helix"
+MONGO_URI = settings.get("mongo_uri")
+DB_NAME = settings.get("db_name", "GPSTracker")
+DEBUG_MODE = settings.get("debug_mode", False)
+
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
-mongo_db = client["GPSTracker"]
+mongo_db = client[DB_NAME]
 
 # Users collection
 users_collection = mongo_db["ourusers"]
