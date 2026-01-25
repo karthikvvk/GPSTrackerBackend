@@ -1,59 +1,48 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../utils/settings.dart';
 
-/// Email/Password authentication service using Python backend
+/// Authentication service using Firebase Auth
 class AuthService {
-  static String? _baseUrl;
-  
-  static Future<String> get baseUrl async {
-    if (_baseUrl == null) {
-      final settings = await Settings.instance;
-      _baseUrl = settings.backendUrl;
-    }
-    return _baseUrl!;
-  }
-  
-  static const String _userIdKey = 'user_id';
-  static const String _emailKey = 'user_email';
-  static const String _displayNameKey = 'user_display_name';
-  static const String _roleKey = 'user_role';
-
-  final http.Client _client;
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
   SharedPreferences? _prefs;
 
+  static const String _roleKey = 'user_role';
+
   // Cached user data
-  String? _userId;
-  String? _email;
-  String? _displayName;
+  User? _user;
   String? _role;
 
-  AuthService({http.Client? client}) : _client = client ?? http.Client();
+  AuthService();
 
   /// Initialize and load cached user data
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
-    _userId = _prefs?.getString(_userIdKey);
-    _email = _prefs?.getString(_emailKey);
-    _displayName = _prefs?.getString(_displayNameKey);
     _role = _prefs?.getString(_roleKey);
+    
+    // Listen to verification state changes
+    _firebaseAuth.authStateChanges().listen((User? user) {
+      _user = user;
+    });
+    
+    // Wait for initial auth state (optional, usually handled by stream)
+    _user = _firebaseAuth.currentUser;
   }
 
   /// Get current user ID
-  String? get userId => _userId;
+  String? get userId => _user?.uid;
 
   /// Get display name
-  String? get displayName => _displayName;
+  String? get displayName => _user?.displayName;
 
   /// Get email
-  String? get email => _email;
+  String? get email => _user?.email;
 
   /// Get role
   String? get role => _role;
 
   /// Check if user is signed in
-  bool get isSignedIn => _userId != null && _userId!.isNotEmpty;
+  bool get isSignedIn => _user != null;
 
   /// Register a new user
   Future<Map<String, dynamic>?> register({
@@ -62,26 +51,16 @@ class AuthService {
     required String displayName,
   }) async {
     try {
-      final url = await baseUrl;
-      final response = await _client.post(
-        Uri.parse('$url/auth/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-          'display_name': displayName,
-        }),
-      ).timeout(const Duration(seconds: 15));
+      final credential = await _firebaseAuth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      
+      await credential.user?.updateDisplayName(displayName);
+      await credential.user?.reload();
+      _user = _firebaseAuth.currentUser;
 
-      if (response.statusCode == 201) {
-        final data = jsonDecode(response.body);
-        final user = data['user'];
-        await _saveUserData(user);
-        return user;
-      } else {
-        final error = jsonDecode(response.body);
-        throw Exception(error['message'] ?? 'Registration failed');
-      }
+      return _userToMap(_user!);
     } catch (e) {
       rethrow;
     }
@@ -93,25 +72,12 @@ class AuthService {
     required String password,
   }) async {
     try {
-      final url = await baseUrl;
-      final response = await _client.post(
-        Uri.parse('$url/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final user = data['user'];
-        await _saveUserData(user);
-        return user;
-      } else {
-        final error = jsonDecode(response.body);
-        throw Exception(error['message'] ?? 'Login failed');
-      }
+      final credential = await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      _user = credential.user;
+      return _userToMap(_user!);
     } catch (e) {
       rethrow;
     }
@@ -119,60 +85,25 @@ class AuthService {
 
   /// Update user role
   Future<void> updateRole(String role) async {
-    if (_userId == null) return;
-
-    try {
-      final url = await baseUrl;
-      final response = await _client.put(
-        Uri.parse('$url/auth/profile'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_id': _userId,
-          'role': role,
-        }),
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        _role = role;
-        await _prefs?.setString(_roleKey, role);
-      }
-    } catch (e) {
-      // Ignore errors, role is stored locally anyway
-      _role = role;
-      await _prefs?.setString(_roleKey, role);
-    }
+    _role = role;
+    await _prefs?.setString(_roleKey, role);
   }
 
-  /// Save user data to SharedPreferences
-  Future<void> _saveUserData(Map<String, dynamic> user) async {
-    _userId = user['user_id'];
-    _email = user['email'];
-    _displayName = user['display_name'];
-    _role = user['role'];
-
-    await _prefs?.setString(_userIdKey, _userId ?? '');
-    await _prefs?.setString(_emailKey, _email ?? '');
-    await _prefs?.setString(_displayNameKey, _displayName ?? '');
-    if (_role != null) {
-      await _prefs?.setString(_roleKey, _role!);
-    }
-  }
-
-  /// Sign out - clear local data
+  /// Sign out
   Future<void> signOut() async {
-    _userId = null;
-    _email = null;
-    _displayName = null;
+    await _firebaseAuth.signOut();
+    _user = null;
     _role = null;
-
-    await _prefs?.remove(_userIdKey);
-    await _prefs?.remove(_emailKey);
-    await _prefs?.remove(_displayNameKey);
     await _prefs?.remove(_roleKey);
   }
 
-  /// Dispose the HTTP client
-  void dispose() {
-    _client.close();
+  /// Helper to convert Firebase User to Map for simple compatibility
+  Map<String, dynamic> _userToMap(User user) {
+    return {
+      'user_id': user.uid,
+      'email': user.email,
+      'display_name': user.displayName,
+      'role': _role, // Role persists independently for now
+    };
   }
 }

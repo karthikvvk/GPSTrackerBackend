@@ -4,8 +4,13 @@ import 'package:gpstracking/services/background_service.dart';
 import 'package:gpstracking/theme.dart';
 import 'package:provider/provider.dart';
 
+import 'package:firebase_core/firebase_core.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase (will use google-services.json on Android)
+  await Firebase.initializeApp();
 
   // Initialize background service
   await BackgroundService.initialize();
