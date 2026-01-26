@@ -10,6 +10,7 @@ from pymongo.server_api import ServerApi
 import dns.resolver
 import bcrypt
 import uuid
+import re
 
 # Load settings from settings.json
 SETTINGS_PATH = os.path.join(os.path.dirname(__file__), 'settings.json')
@@ -40,6 +41,10 @@ sync_queue = queue.Queue()
 
 def get_today_collection():
     return datetime.now(timezone.utc).strftime("%Y_%m_%d")
+
+def is_date_collection(name):
+    """Check if collection name is in YYYY_MM_DD format"""
+    return bool(re.match(r'^\d{4}_\d{2}_\d{2}$', name))
 
 # =============================================================================
 # Auth Endpoints
@@ -308,20 +313,22 @@ def sync_all():
         return jsonify({"status": "error", "message": "Missing userid"}), 400
 
     try:
-        date_docs = list(mongo_db.list_collection_names())
+        # Get all collections that look like dates
+        all_collections = mongo_db.list_collection_names()
+        date_docs = [c for c in all_collections if is_date_collection(c)]
         date_docs.sort()
 
-
-        # Also include today's collection if not in history
+        # Also include today's collection if not in history (and matches format)
         today_str = get_today_collection()
-        if today_str not in date_docs:
+        if today_str not in date_docs and is_date_collection(today_str):
             date_docs.append(today_str)
 
         full_sync_data = []
 
         for date_str in date_docs:
             collection = mongo_db[date_str]
-            cursor = collection.find({}, {"_id": 0})
+            # CRITICAL FIX: Filter by userid to avoid leaking other users' data
+            cursor = collection.find({"userid": userid}, {"_id": 0})
             full_sync_data.extend(list(cursor))
 
         return jsonify({"status": "success", "synced_data": full_sync_data})
@@ -335,11 +342,35 @@ def history_dates():
     if not userid:
         return jsonify({"status": "error", "message": "Missing userid"}), 400
 
+    # Only look at collections that match YYYY_MM_DD
+    all_collections = mongo_db.list_collection_names()
+    date_collections = [c for c in all_collections if is_date_collection(c)]
+    
     user_dates = [
-        date_str for date_str in mongo_db.list_collection_names()
+        date_str for date_str in date_collections
         if mongo_db[date_str].count_documents({"userid": userid}) > 0
     ]
     return jsonify({"available_dates": sorted(user_dates)})
+
+@app.route('/history/view', methods=['GET'])
+def view_history():
+    userid = request.args.get("userid")
+    date_str = request.args.get("date")
+    
+    if not userid:
+        return jsonify({"status": "error", "message": "Missing userid"}), 400
+    if not date_str:
+        return jsonify({"status": "error", "message": "Missing date"}), 400
+        
+    if not is_date_collection(date_str):
+         return jsonify({"status": "error", "message": "Invalid date format. Use YYYY_MM_DD"}), 400
+
+    collection = mongo_db[date_str]
+    # Check if collection exists implicitly by checking if it has data? 
+    # Or just query it. MongoDB is forgiving.
+    
+    coords = list(collection.find({"userid": userid}, {'_id': 0}))
+    return jsonify(coords)
 
 @app.route('/serverstatus', methods=['GET'])
 def get_server_status():
