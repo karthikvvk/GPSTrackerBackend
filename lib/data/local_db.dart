@@ -6,7 +6,7 @@ import 'models.dart';
 class LocalDb {
   static Database? _database;
   static const String _dbName = 'gpstracker.db';
-  static const int _dbVersion = 2;
+  static const int _dbVersion = 3;
 
   /// Table names
   static const String _logsTable = 'coordinate_logs';
@@ -58,17 +58,49 @@ class LocalDb {
     ''');
 
     // Index for faster date queries
-    await db.execute(
-        'CREATE INDEX idx_logs_date ON $_logsTable(sim_date)');
-    await db.execute(
-        'CREATE INDEX idx_backup_time ON $_backupTable(logged_time)');
+    await db.execute('CREATE INDEX idx_logs_date ON $_logsTable(sim_date)');
+    await db
+        .execute('CREATE INDEX idx_backup_time ON $_backupTable(logged_time)');
   }
 
-  static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+  static Future<void> _onUpgrade(
+      Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       // Migration: rename firebase_id to user_id
-      await db.execute('ALTER TABLE $_logsTable RENAME COLUMN firebase_id TO user_id');
-      await db.execute('ALTER TABLE $_backupTable RENAME COLUMN firebase_id TO user_id');
+      await db.execute(
+          'ALTER TABLE $_logsTable RENAME COLUMN firebase_id TO user_id');
+      await db.execute(
+          'ALTER TABLE $_backupTable RENAME COLUMN firebase_id TO user_id');
+    }
+
+    if (oldVersion < 3) {
+      // Migration: Ensure sim_date column exists and populate it
+      try {
+        await db.execute('ALTER TABLE $_logsTable ADD COLUMN sim_date TEXT');
+      } catch (_) {
+        // Column might already exist, ignore error
+      }
+
+      try {
+        await db.execute('ALTER TABLE $_backupTable ADD COLUMN sim_date TEXT');
+      } catch (_) {
+        // Column might already exist, ignore error
+      }
+
+      // Populate sim_date from logged_time if it's null or empty
+      // logged_time format: YYYY-MM-DDTHH:MM:SS.mmmZ or similar
+      // We extract YYYY-MM-DD
+      await db.execute('''
+        UPDATE $_logsTable 
+        SET sim_date = substr(logged_time, 1, 10) 
+        WHERE sim_date IS NULL OR sim_date = ''
+      ''');
+
+      await db.execute('''
+        UPDATE $_backupTable 
+        SET sim_date = substr(logged_time, 1, 10) 
+        WHERE sim_date IS NULL OR sim_date = ''
+      ''');
     }
   }
 
@@ -184,7 +216,8 @@ class LocalDb {
   /// Get count of backup logs
   static Future<int> getBackupCount() async {
     final db = await database;
-    final result = await db.rawQuery('SELECT COUNT(*) as count FROM $_backupTable');
+    final result =
+        await db.rawQuery('SELECT COUNT(*) as count FROM $_backupTable');
     return result.first['count'] as int;
   }
 
