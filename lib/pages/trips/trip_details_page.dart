@@ -4,8 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:gpstracking/theme.dart';
 import 'package:gpstracking/ui/app_widgets.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:gpstracking/data/local_db.dart';
 
 class TripDetailsPage extends StatefulWidget {
   const TripDetailsPage({super.key, required this.tripId});
@@ -17,61 +16,47 @@ class TripDetailsPage extends StatefulWidget {
 }
 
 class _TripDetailsPageState extends State<TripDetailsPage> {
+  final MapController _mapController = MapController();
+
   DateTime selectedDate = DateTime.now();
   TimeOfDay startTime = const TimeOfDay(hour: 0, minute: 0);
   TimeOfDay endTime = const TimeOfDay(hour: 23, minute: 59);
   List<GpsPoint> gpsPoints = [];
   bool isLoading = false;
-  Database? _database;
 
   @override
   void initState() {
     super.initState();
-    _initDb();
-  }
-
-  Future<void> _initDb() async {
-    try {
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'gpstracker.db');
-
-      _database = await openDatabase(path);
-      _loadGpsData();
-    } catch (e) {
-      debugPrint('Error opening database: $e');
-    }
+    _loadGpsData();
   }
 
   @override
   void dispose() {
-    _database?.close();
     super.dispose();
   }
 
   Future<void> _loadGpsData() async {
-    if (_database == null) return;
-
     setState(() => isLoading = true);
 
     try {
       // Parse date from tripId if initial load
-      String dateStr;
       if (widget.tripId != 'unknown' && gpsPoints.isEmpty) {
-        dateStr = widget.tripId;
         try {
-          selectedDate = DateTime.parse(dateStr);
+          selectedDate = DateTime.parse(widget.tripId);
         } catch (_) {
-          dateStr = selectedDate.toIso8601String().split('T').first;
+          // Keep default selectedDate
+          selectedDate = DateTime.now();
         }
-      } else {
-        dateStr = selectedDate.toIso8601String().split('T').first;
       }
 
-      // Convert to table name format: 2026_01_26
-      String tableName = dateStr.replaceAll('-', '_');
+      // Get date string for DB lookup (YYYY-MM-DD)
+      final dateStr = selectedDate.toIso8601String().split('T').first;
 
-      // Create DateTime range for query
-      DateTime startDateTime = DateTime(
+      // Fetch all logs for the day (LocalDb uses sim_date column)
+      final logs = await LocalDb.getLogsByDate(dateStr);
+
+      // Create DateTime range for filtering
+      final startDateTime = DateTime(
         selectedDate.year,
         selectedDate.month,
         selectedDate.day,
@@ -79,7 +64,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         startTime.minute,
       );
 
-      DateTime endDateTime = DateTime(
+      final endDateTime = DateTime(
         selectedDate.year,
         selectedDate.month,
         selectedDate.day,
@@ -87,38 +72,22 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         endTime.minute,
       );
 
-      // Check if table exists
-      final tableExists = await _database!.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-          [tableName]);
-
-      if (tableExists.isEmpty) {
-        if (mounted) {
-          setState(() {
-            gpsPoints = [];
-            isLoading = false;
-          });
-        }
-        return;
-      }
-
-      // Query SQLite with time range filter
-      // Structure: _id, userid, x_cord, y_cord, logged_time
-      final results = await _database!.rawQuery('''
-        SELECT * FROM `$tableName`
-        WHERE logged_time >= ? AND logged_time <= ?
-        ORDER BY logged_time ASC
-        ''', [startDateTime.toIso8601String(), endDateTime.toIso8601String()]);
-
       if (mounted) {
         setState(() {
-          gpsPoints = results
-              .map((row) => GpsPoint(
-                    (row['y_cord'] as num).toDouble(), // Latitude
-                    (row['x_cord'] as num).toDouble(), // Longitude
-                    DateTime.parse(row['logged_time'] as String),
+          gpsPoints = logs
+              .map((log) => GpsPoint(
+                    log.xCord, // Latitude (Fixed: xCord is Lat based on LiveMapPage)
+                    log.yCord, // Longitude (Fixed: yCord is Lng based on LiveMapPage)
+                    DateTime.parse(log.loggedTime),
                   ))
-              .toList();
+              .where((p) {
+            // In-memory filter handles timezone interactions better than SQL string compare
+            // We use isAfter/isBefore or strict comparison
+            return (p.timestamp.isAfter(startDateTime) ||
+                    p.timestamp.isAtSameMomentAs(startDateTime)) &&
+                (p.timestamp.isBefore(endDateTime) ||
+                    p.timestamp.isAtSameMomentAs(endDateTime));
+          }).toList();
           isLoading = false;
         });
       }
@@ -219,6 +188,76 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMap(BuildContext context, ColorScheme scheme) {
+    final points =
+        gpsPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
+
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter:
+            points.isNotEmpty ? points.first : const LatLng(13.0827, 80.2707),
+        initialZoom: 15.0,
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.kodomogps.tracker',
+        ),
+
+        // Path polyline
+        if (points.length > 1)
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: points,
+                strokeWidth: 3.0,
+                color: scheme.primary.withValues(alpha: 0.7),
+              ),
+            ],
+          ),
+
+        // Markers
+        MarkerLayer(
+          markers: [
+            // All points as small dots
+            ...points.asMap().entries.map((entry) {
+              final isLast = entry.key == points.length - 1;
+              return Marker(
+                point: entry.value,
+                width: isLast ? 30 : 12,
+                height: isLast ? 30 : 12,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isLast
+                        ? scheme.primary
+                        : scheme.primary.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                    border:
+                        Border.all(color: Colors.white, width: isLast ? 3 : 1),
+                    boxShadow: isLast
+                        ? [
+                            BoxShadow(
+                              color: scheme.primary.withValues(alpha: 0.3),
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: isLast
+                      ? Icon(Icons.person_pin_circle_rounded,
+                          color: Colors.white, size: 18)
+                      : null,
+                ),
+              );
+            }),
+          ],
+        ),
+      ],
     );
   }
 
@@ -342,7 +381,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // Map Widget with OpenStreetMap
+                  // Map Widget using LiveMapPage style
                   Container(
                     height: 300,
                     decoration: BoxDecoration(
@@ -366,95 +405,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                                             color: scheme.onSurfaceVariant),
                                   ),
                                 )
-                              : FlutterMap(
-                                  options: MapOptions(
-                                    initialCameraFit: CameraFit.bounds(
-                                      bounds: LatLngBounds.fromPoints(
-                                        gpsPoints
-                                            .map((p) =>
-                                                LatLng(p.latitude, p.longitude))
-                                            .toList(),
-                                      ),
-                                      padding: const EdgeInsets.all(20),
-                                    ),
-                                    interactionOptions:
-                                        const InteractionOptions(
-                                      flags: InteractiveFlag.all &
-                                          ~InteractiveFlag.rotate,
-                                    ),
-                                  ),
-                                  children: [
-                                    // OpenStreetMap Tile Layer
-                                    TileLayer(
-                                      urlTemplate:
-                                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                      userAgentPackageName:
-                                          'com.kodomogps.tracker',
-                                      maxZoom: 19,
-                                      minZoom: 1,
-                                    ),
-                                    PolylineLayer(
-                                      polylines: [
-                                        Polyline(
-                                          points: gpsPoints
-                                              .map((p) => LatLng(
-                                                  p.latitude, p.longitude))
-                                              .toList(),
-                                          strokeWidth: 4.0,
-                                          color: scheme.primary,
-                                        ),
-                                      ],
-                                    ),
-                                    MarkerLayer(
-                                      markers: [
-                                        // Start Marker (White with border)
-                                        if (gpsPoints.isNotEmpty)
-                                          Marker(
-                                            point: LatLng(
-                                                gpsPoints.first.latitude,
-                                                gpsPoints.first.longitude),
-                                            width: 12,
-                                            height: 12,
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: Colors.white,
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                    color: scheme.primary,
-                                                    width: 3),
-                                              ),
-                                            ),
-                                          ),
-                                        // End Marker (Filled with shadow)
-                                        if (gpsPoints.isNotEmpty)
-                                          Marker(
-                                            point: LatLng(
-                                                gpsPoints.last.latitude,
-                                                gpsPoints.last.longitude),
-                                            width: 16,
-                                            height: 16,
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: scheme.primary,
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                    color: Colors.white,
-                                                    width: 2),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: scheme.primary
-                                                        .withValues(alpha: 0.4),
-                                                    blurRadius: 8,
-                                                    spreadRadius: 2,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+                              : _buildMap(context, scheme),
                     ),
                   ),
                 ],

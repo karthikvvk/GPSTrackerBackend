@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>High Contrast Gradient Border Themes</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, monospace;
+        }
+
+        body {
+            margin: 0;
+            padding: 32px;
+            background: #08080c;
+            color: #f5f5f5;
+        }
+
+        h1 {
+            margin-bottom: 24px;
+        }
+
+        .theme {
+            margin-bottom: 48px;
+        }
+
+        .theme h2 {
+            margin-bottom: 12px;
+            color: var(--accent-1);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            position: relative;
+            padding: 18px;
+            background: var(--bg-card);
+            border-radius: 14px;
+        }
+
+        /* gradient border */
+        .card::before {
+            content: "";
+            position: absolute;
+            inset: -2px;
+            border-radius: 16px;
+            background: linear-gradient(135deg,
+                    var(--accent-1),
+                    var(--accent-2),
+                    var(--accent-3));
+            z-index: -1;
+        }
+
+        .button {
+            margin-top: 12px;
+            padding: 10px 16px;
+            background: var(--accent-1);
+            color: #000;
+            font-weight: 600;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .button:hover {
+            background: var(--accent-2);
+            box-shadow: 0 0 12px var(--accent-2);
+        }
+
+        .input {
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            background: #0e0e13;
+            color: #f5f5f5;
+            border-radius: 8px;
+            border: 2px solid transparent;
+        }
+
+        .input:focus {
+            outline: none;
+            border-image: linear-gradient(90deg,
+                    var(--accent-1),
+                    var(--accent-2),
+                    var(--accent-3)) 1;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>10 High-Contrast Yellow / Orange Gradient-Border Themes</h1>
+
+    <!-- THEME 1 -->
+    <div class="theme" style="--bg-card:#121218;--accent-1:#ffd84d;--accent-2:#ff9f1c;--accent-3:#ff5f1f;">
+        <h2>1. Amber Flame</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Status Card</h3>
+                <p>Classic yellow → orange → red.</p>
+                <button class="button">Action</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3>
+                <input class="input" placeholder="Type here…" />
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 2 -->
+    <div class="theme" style="--bg-card:#101015;--accent-1:#ffe066;--accent-2:#ffb703;--accent-3:#fb8500;">
+        <h2>2. Solar Gold</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Panel</h3>
+                <p>Bright but controlled.</p><button class="button">Run</button>
+            </div>
+            <div class="card">
+                <h3>Field</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 3 -->
+    <div class="theme" style="--bg-card:#14141a;--accent-1:#ffd166;--accent-2:#ef8354;--accent-3:#ee6c4d;">
+        <h2>3. Warm Ember</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Card</h3>
+                <p>Soft warmth.</p><button class="button">Apply</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 4 -->
+    <div class="theme" style="--bg-card:#0f0f14;--accent-1:#ffdd55;--accent-2:#ffaa33;--accent-3:#ff7733;">
+        <h2>4. Industrial Heat</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Module</h3>
+                <p>Strong industrial contrast.</p><button class="button">Start</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 5 -->
+    <div class="theme" style="--bg-card:#111116;--accent-1:#ffe8a3;--accent-2:#ffc857;--accent-3:#ff9f1c;">
+        <h2>5. Soft Gold</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Panel</h3>
+                <p>Less aggressive.</p><button class="button">Confirm</button>
+            </div>
+            <div class="card">
+                <h3>Field</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 6 -->
+    <div class="theme" style="--bg-card:#131318;--accent-1:#ffd700;--accent-2:#ff8c00;--accent-3:#ff4500;">
+        <h2>6. Fire Core</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>System</h3>
+                <p>High energy.</p><button class="button">Execute</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 7 -->
+    <div class="theme" style="--bg-card:#0d0d12;--accent-1:#ffe169;--accent-2:#f4a261;--accent-3:#e76f51;">
+        <h2>7. Burnt Clay</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Card</h3>
+                <p>Earthy orange tones.</p><button class="button">Save</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 8 -->
+    <div class="theme" style="--bg-card:#101018;--accent-1:#fff1a8;--accent-2:#ffbf69;--accent-3:#ff9f1c;">
+        <h2>8. Sunset Gold</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Panel</h3>
+                <p>Balanced warmth.</p><button class="button">Open</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 9 -->
+    <div class="theme" style="--bg-card:#14141c;--accent-1:#ffd23f;--accent-2:#f8961e;--accent-3:#f3722c;">
+        <h2>9. Molten Steel</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Module</h3>
+                <p>Sharp contrast.</p><button class="button">Deploy</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+    <!-- THEME 10 -->
+    <div class="theme" style="--bg-card:#0e0e14;--accent-1:#fff3b0;--accent-2:#ffba08;--accent-3:#faa307;">
+        <h2>10. Signal Yellow</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Alert</h3>
+                <p>Excellent visibility.</p><button class="button">Acknowledge</button>
+            </div>
+            <div class="card">
+                <h3>Input</h3><input class="input">
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>

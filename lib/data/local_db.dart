@@ -136,6 +136,23 @@ class LocalDb {
     return results.map((row) => CoordinateLog.fromDb(row)).toList();
   }
 
+  /// Get logs within a specific time range
+  static Future<List<CoordinateLog>> getLogsByTimeRange(
+      DateTime start, DateTime end) async {
+    final db = await database;
+    final startIso = start.toIso8601String();
+    final endIso = end.toIso8601String();
+
+    final results = await db.query(
+      _logsTable,
+      where: 'logged_time >= ? AND logged_time <= ?',
+      whereArgs: [startIso, endIso],
+      orderBy: 'logged_time ASC',
+    );
+
+    return results.map((row) => CoordinateLog.fromDb(row)).toList();
+  }
+
   /// Get all unique dates with logs
   static Future<List<String>> getAllDates() async {
     final db = await database;

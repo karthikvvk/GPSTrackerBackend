@@ -144,8 +144,8 @@ class _LiveMapPageState extends State<LiveMapPage> {
               decoration: BoxDecoration(
                 color: scheme.surface,
                 border: Border(
-                  top: BorderSide(
-                      color: scheme.outline.withValues(alpha: 0.16)),
+                  top:
+                      BorderSide(color: scheme.outline.withValues(alpha: 0.16)),
                 ),
               ),
               child: Row(
@@ -196,9 +196,7 @@ class _LiveMapPageState extends State<LiveMapPage> {
   }
 
   Widget _buildMap(BuildContext context, ColorScheme scheme) {
-    final points = _coordinates
-        .map((c) => LatLng(c.xCord, c.yCord))
-        .toList();
+    final points = _coordinates.map((c) => LatLng(c.xCord, c.yCord)).toList();
 
     return FlutterMap(
       mapController: _mapController,
@@ -236,9 +234,12 @@ class _LiveMapPageState extends State<LiveMapPage> {
                 height: isLast ? 30 : 12,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: isLast ? scheme.primary : scheme.primary.withValues(alpha: 0.5),
+                    color: isLast
+                        ? scheme.primary
+                        : scheme.primary.withValues(alpha: 0.5),
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: isLast ? 3 : 1),
+                    border:
+                        Border.all(color: Colors.white, width: isLast ? 3 : 1),
                     boxShadow: isLast
                         ? [
                             BoxShadow(
