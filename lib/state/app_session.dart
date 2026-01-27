@@ -134,6 +134,37 @@ class AppSession extends ChangeNotifier {
     }
   }
 
+  /// Create account without automatic sign-in state update (for custom flows)
+  Future<Map<String, dynamic>?> createAccount(
+      String email, String password, String displayName) async {
+    try {
+      return await _authService.register(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
+    } catch (e) {
+      if (kDebugMode) print('[AppSession] Create account error: $e');
+      rethrow;
+    }
+  }
+
+  /// Manually complete sign-in after custom flow
+  void completeSignIn(Map<String, dynamic> user) {
+    _signedIn = true;
+    _userId = user['user_id'];
+    _displayName = user['display_name'];
+    _email = user['email'];
+    _viewerName = _displayName ?? 'You';
+
+    final roleStr = user['role'];
+    if (roleStr != null) {
+      _role = roleStr == 'kodomo' ? UserRole.kodomo : UserRole.kazoku;
+    }
+
+    notifyListeners();
+  }
+
   /// Sign up with email and password
   Future<bool> signUpWithEmail(
       String email, String password, String displayName) async {
@@ -144,12 +175,7 @@ class AppSession extends ChangeNotifier {
         displayName: displayName,
       );
       if (user != null) {
-        _signedIn = true;
-        _userId = user['user_id'];
-        _displayName = user['display_name'];
-        _email = user['email'];
-        _viewerName = _displayName ?? 'You';
-        notifyListeners();
+        completeSignIn(user);
         return true;
       }
       return false;
