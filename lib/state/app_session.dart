@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/services/auth_service.dart';
 
@@ -72,8 +73,7 @@ class AppSession extends ChangeNotifier {
   String? get linkedChildName => _linkedChildName;
   bool get hasLinkedChild =>
       _linkedChildName != null && _linkedChildName!.trim().isNotEmpty;
-  String get subjectName =>
-      hasLinkedChild ? _linkedChildName!.trim() : 'You';
+  String get subjectName => hasLinkedChild ? _linkedChildName!.trim() : 'You';
 
   // =========================================================================
   // Constructor
@@ -92,13 +92,13 @@ class AppSession extends ChangeNotifier {
       _displayName = _authService.displayName;
       _email = _authService.email;
       _viewerName = _displayName ?? 'You';
-      
+
       // Restore role if saved
       final roleStr = _authService.role;
       if (roleStr != null) {
         _role = roleStr == 'kodomo' ? UserRole.kodomo : UserRole.kazoku;
       }
-      
+
       notifyListeners();
     }
   }
@@ -117,13 +117,13 @@ class AppSession extends ChangeNotifier {
         _displayName = user['display_name'];
         _email = user['email'];
         _viewerName = _displayName ?? 'You';
-        
+
         // Restore role if saved
         final roleStr = user['role'];
         if (roleStr != null) {
           _role = roleStr == 'kodomo' ? UserRole.kodomo : UserRole.kazoku;
         }
-        
+
         notifyListeners();
         return true;
       }
@@ -135,7 +135,8 @@ class AppSession extends ChangeNotifier {
   }
 
   /// Sign up with email and password
-  Future<bool> signUpWithEmail(String email, String password, String displayName) async {
+  Future<bool> signUpWithEmail(
+      String email, String password, String displayName) async {
     try {
       final user = await _authService.register(
         email: email,
@@ -244,9 +245,8 @@ class AppSession extends ChangeNotifier {
   void removeLinkedChild(String odemoId) {
     _linkedChildren.removeWhere((c) => c.odemoId == odemoId);
     if (_selectedChildId == odemoId) {
-      _selectedChildId = _linkedChildren.isNotEmpty
-          ? _linkedChildren.first.odemoId
-          : null;
+      _selectedChildId =
+          _linkedChildren.isNotEmpty ? _linkedChildren.first.odemoId : null;
     }
     notifyListeners();
   }
@@ -279,6 +279,19 @@ class AppSession extends ChangeNotifier {
   /// UI-only helper: removes the linked child account (from original)
   void unlinkChild() {
     _linkedChildName = null;
+    notifyListeners();
+  }
+  // =========================================================================
+  // Theme State
+  // =========================================================================
+
+  ThemeMode _themeMode = ThemeMode.dark;
+
+  ThemeMode get themeMode => _themeMode;
+
+  void toggleTheme() {
+    _themeMode =
+        _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
   }
 }
