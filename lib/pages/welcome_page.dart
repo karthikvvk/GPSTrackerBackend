@@ -19,12 +19,15 @@ class WelcomePage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: AppSpacing.lg),
-              Text('GPS Tracking', style: context.textStyles.headlineLarge?.copyWith(color: scheme.onSurface)),
+              Text('GPS Tracking',
+                  style: context.textStyles.headlineLarge
+                      ?.copyWith(color: scheme.onSurface)),
               const SizedBox(height: AppSpacing.sm),
-              Text(
-                'UI-first build. Mock data only — ready to wire to localhost endpoints later.',
-                style: context.textStyles.bodyLarge?.copyWith(color: scheme.onSurfaceVariant, height: 1.5),
-              ),
+              // Text(
+              //   'UI-first build. Mock data only — ready to wire to localhost endpoints later.',
+              //   style: context.textStyles.bodyLarge
+              //       ?.copyWith(color: scheme.onSurfaceVariant, height: 1.5),
+              // ),
               const SizedBox(height: AppSpacing.xl),
               Expanded(
                 child: GradientCard(
@@ -40,18 +43,22 @@ class WelcomePage extends StatelessWidget {
                               color: scheme.primary.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(AppRadius.md),
                             ),
-                            child: Icon(Icons.location_on_rounded, color: scheme.primary),
+                            child: Icon(Icons.location_on_rounded,
+                                color: scheme.primary),
                           ),
                           const SizedBox(width: AppSpacing.md),
                           Expanded(
-                            child: Text('Track trips, devices, and activity', style: context.textStyles.titleLarge?.copyWith(color: scheme.onSurface)),
+                            child: Text('Track trips, devices, and activity',
+                                style: context.textStyles.titleLarge
+                                    ?.copyWith(color: scheme.onSurface)),
                           ),
                         ],
                       ),
                       const SizedBox(height: AppSpacing.md),
                       Text(
                         'Map is intentionally represented as placeholders in this phase. We focus on flow + fields.',
-                        style: context.textStyles.bodyMedium?.copyWith(color: scheme.onSurfaceVariant, height: 1.5),
+                        style: context.textStyles.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant, height: 1.5),
                       ),
                       const Spacer(),
                       Wrap(
@@ -77,7 +84,8 @@ class WelcomePage extends StatelessWidget {
               const SizedBox(height: AppSpacing.lg),
               Text(
                 'Tip: When backend is ready, swap mock providers for real API/RoomDB adapters.',
-                style: context.textStyles.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+                style: context.textStyles.labelMedium
+                    ?.copyWith(color: scheme.onSurfaceVariant),
               ),
             ],
           ),
