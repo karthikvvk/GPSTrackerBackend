@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:gpstracking/theme.dart';
 
 class GradientCard extends StatelessWidget {
-  const GradientCard({super.key, required this.child, this.padding = AppSpacing.paddingMd, this.onTap});
+  const GradientCard(
+      {super.key,
+      required this.child,
+      this.padding = AppSpacing.paddingMd,
+      this.onTap});
 
   final Widget child;
   final EdgeInsets padding;
@@ -22,11 +26,7 @@ class GradientCard extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: radius,
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [scheme.primaryContainer, scheme.surface],
-            ),
+            color: scheme.surface,
             border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
           ),
           child: Padding(padding: padding, child: child),
@@ -37,7 +37,8 @@ class GradientCard extends StatelessWidget {
 }
 
 class PrimaryPillButton extends StatelessWidget {
-  const PrimaryPillButton({super.key, required this.label, required this.onPressed, this.icon});
+  const PrimaryPillButton(
+      {super.key, required this.label, required this.onPressed, this.icon});
 
   final String label;
   final VoidCallback? onPressed;
@@ -53,7 +54,8 @@ class PrimaryPillButton extends StatelessWidget {
         backgroundColor: scheme.primary,
         foregroundColor: scheme.onPrimary,
         shape: const StadiumBorder(),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 14),
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 14),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -62,7 +64,11 @@ class PrimaryPillButton extends StatelessWidget {
             Icon(icon, size: 18, color: scheme.onPrimary),
             const SizedBox(width: AppSpacing.sm),
           ],
-          Text(label, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: scheme.onPrimary)),
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: scheme.onPrimary)),
         ],
       ),
     );
@@ -70,7 +76,8 @@ class PrimaryPillButton extends StatelessWidget {
 }
 
 class SubtleOutlineButton extends StatelessWidget {
-  const SubtleOutlineButton({super.key, required this.label, required this.onPressed, this.icon});
+  const SubtleOutlineButton(
+      {super.key, required this.label, required this.onPressed, this.icon});
 
   final String label;
   final VoidCallback? onPressed;
@@ -85,7 +92,8 @@ class SubtleOutlineButton extends StatelessWidget {
         foregroundColor: scheme.onSurface,
         side: BorderSide(color: scheme.outline.withValues(alpha: 0.35)),
         shape: const StadiumBorder(),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 14),
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 14),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -94,7 +102,11 @@ class SubtleOutlineButton extends StatelessWidget {
             Icon(icon, size: 18, color: scheme.onSurface),
             const SizedBox(width: AppSpacing.sm),
           ],
-          Text(label, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: scheme.onSurface)),
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: scheme.onSurface)),
         ],
       ),
     );
