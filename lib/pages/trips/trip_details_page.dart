@@ -102,20 +102,6 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     }
   }
 
-  Future<void> _selectDate(BuildContext context) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-    );
-
-    if (picked != null && picked != selectedDate) {
-      setState(() => selectedDate = picked);
-      _loadGpsData();
-    }
-  }
-
   Future<void> _selectTimeRange(BuildContext context) async {
     final scheme = Theme.of(context).colorScheme;
 
@@ -286,43 +272,6 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                     ?.copyWith(color: scheme.onSurfaceVariant)),
             const SizedBox(height: AppSpacing.md),
 
-            // Date Selection Card
-            GradientCard(
-              child: InkWell(
-                onTap: () => _selectDate(context),
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                child: Padding(
-                  padding: AppSpacing.paddingMd,
-                  child: Row(
-                    children: [
-                      Icon(Icons.calendar_today_rounded, color: scheme.primary),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Selected Date',
-                                style: context.textStyles.labelMedium
-                                    ?.copyWith(color: scheme.onSurfaceVariant)),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
-                              style: context.textStyles.titleMedium
-                                  ?.copyWith(color: scheme.onSurface),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.chevron_right_rounded,
-                          color: scheme.onSurfaceVariant),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: AppSpacing.md),
-
             // Time Range Selection Card
             GradientCard(
               child: InkWell(
@@ -372,6 +321,17 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                       Text('Route Map',
                           style: context.textStyles.titleMedium
                               ?.copyWith(color: scheme.onSurface)),
+                      if (gpsPoints.isNotEmpty)
+                        IconButton(
+                          icon: Icon(Icons.my_location_rounded,
+                              color: scheme.primary),
+                          onPressed: () {
+                            if (gpsPoints.isEmpty) return;
+                            final start = gpsPoints.first;
+                            _mapController.move(
+                                LatLng(start.latitude, start.longitude), 15.0);
+                          },
+                        ),
                       const Spacer(),
                       if (gpsPoints.isNotEmpty)
                         Text('${gpsPoints.length} points',
@@ -383,7 +343,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
 
                   // Map Widget using LiveMapPage style
                   Container(
-                    height: 300,
+                    height: 550,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(AppRadius.lg),
                       color: scheme.surfaceContainerHighest,

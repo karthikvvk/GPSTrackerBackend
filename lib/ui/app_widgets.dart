@@ -26,7 +26,7 @@ class GradientCard extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: radius,
-            color: scheme.surface,
+            color: AppSurfaces.translucentPrimary(scheme),
             border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
           ),
           child: Padding(padding: padding, child: child),
