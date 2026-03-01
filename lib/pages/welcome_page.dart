@@ -20,6 +20,7 @@ class _WelcomePageState extends State<WelcomePage> {
   final _passwordController = TextEditingController();
   bool _isSignUp = false;
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   @override
   Widget build(BuildContext context) {
@@ -70,10 +71,19 @@ class _WelcomePageState extends State<WelcomePage> {
                         const SizedBox(height: AppSpacing.md),
                         TextFormField(
                           controller: _passwordController,
-                          obscureText: true,
-                          decoration: const InputDecoration(
+                          obscureText: _obscurePassword,
+                          decoration: InputDecoration(
                             labelText: 'Password',
-                            prefixIcon: Icon(Icons.lock_outline),
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              icon: Icon(_obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined),
+                              onPressed: () {
+                                setState(
+                                    () => _obscurePassword = !_obscurePassword);
+                              },
+                            ),
                           ),
                           validator: (value) => value == null || value.isEmpty
                               ? 'Please enter password'
@@ -162,6 +172,7 @@ class _WelcomePageState extends State<WelcomePage> {
               icon: Icons.location_on_rounded,
               title: "I'm being tracked",
               subtitle: "Kodomo Mode",
+              color: Theme.of(context).colorScheme.primary, // Yellow/Gold
               onTap: () => _finalizeSignUp(context, user, UserRole.kodomo),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -169,6 +180,7 @@ class _WelcomePageState extends State<WelcomePage> {
               icon: Icons.visibility_rounded,
               title: "I'm tracking someone",
               subtitle: "Kazoku Mode",
+              color: Theme.of(context).colorScheme.tertiary, // Orange
               onTap: () => _finalizeSignUp(context, user, UserRole.kazoku),
             ),
           ],
@@ -224,45 +236,49 @@ class _RoleOption extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    required this.color,
     required this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final Color color;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
+    return GradientCard(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: Container(
-        padding: AppSpacing.paddingMd,
-        decoration: BoxDecoration(
-          border: Border.all(color: scheme.outline.withValues(alpha: 0.3)),
-          borderRadius: BorderRadius.circular(AppRadius.md),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: scheme.primary),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: context.textStyles.titleMedium
-                          ?.copyWith(color: scheme.onSurface)),
-                  Text(subtitle,
-                      style: context.textStyles.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant)),
-                ],
-              ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
-          ],
-        ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: context.textStyles.titleMedium
+                        ?.copyWith(color: scheme.onSurface)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: context.textStyles.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
+        ],
       ),
     );
   }

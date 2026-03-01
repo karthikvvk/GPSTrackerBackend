@@ -6,6 +6,7 @@ import 'package:gpstracking/pages/auth/sign_up_page.dart';
 import 'package:gpstracking/pages/dashboard/dashboard_page.dart';
 import 'package:gpstracking/pages/map/live_map_page.dart';
 import 'package:gpstracking/pages/profile/profile_page.dart';
+import 'package:gpstracking/pages/profile/link_account_page.dart';
 import 'package:gpstracking/pages/shell/app_shell.dart';
 import 'package:gpstracking/pages/trips/trip_details_page.dart';
 import 'package:gpstracking/pages/trips/trips_page.dart';
@@ -15,8 +16,11 @@ import 'package:gpstracking/ui/app_motion.dart';
 
 class AppRouter {
   static final AppSession session = AppSession();
+  static final GlobalKey<NavigatorState> _rootNavigatorKey =
+      GlobalKey<NavigatorState>(debugLabel: 'root');
 
   static final GoRouter router = GoRouter(
+    navigatorKey: _rootNavigatorKey,
     initialLocation: AppRoutes.welcome,
     refreshListenable: session,
     redirect: (context, state) {
@@ -119,6 +123,15 @@ class AppRouter {
             name: 'profile',
             pageBuilder: (context, state) =>
                 NoTransitionPage(child: const ProfilePage()),
+            routes: [
+              GoRoute(
+                path: 'link',
+                name: 'linkAccount',
+                parentNavigatorKey: _rootNavigatorKey,
+                pageBuilder: (context, state) =>
+                    _page(child: const LinkAccountPage(), state: state),
+              ),
+            ],
           ),
         ],
       ),
@@ -148,6 +161,8 @@ class AppRoutes {
   static const String trips = '/app/trips';
   static const String liveMap = '/app/map';
   static const String profile = '/app/profile';
+  static const String linkAccount = '/app/profile/link';
 
-  static String tripDetails(String tripId) => '${AppRoutes.trips}/details/$tripId';
+  static String tripDetails(String tripId) =>
+      '${AppRoutes.trips}/details/$tripId';
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:gpstracking/nav.dart';
 import 'package:gpstracking/state/app_session.dart';
 import 'package:gpstracking/theme.dart';
@@ -57,6 +58,69 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
+          // QR Code section for Kodomo (child) users
+          if (session.isKodomo) ...[
+            Text('Your QR Code',
+                style: context.textStyles.titleLarge
+                    ?.copyWith(color: scheme.onSurface)),
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              padding: AppSpacing.paddingLg,
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border:
+                    Border.all(color: scheme.outline.withValues(alpha: 0.16)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: QrImageView(
+                      data:
+                          '${session.email ?? ''}:kodomo_link_${session.userId ?? ''}',
+                      version: QrVersions.auto,
+                      size: 200,
+                      backgroundColor: Colors.white,
+                      errorCorrectionLevel: QrErrorCorrectLevel.M,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.qr_code_rounded,
+                          size: 20, color: scheme.primary),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        'Scan QR',
+                        style: context.textStyles.titleSmall?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                          decorationColor: scheme.primary,
+                          decorationThickness: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Show this QR code to your parent/guardian.\nThey can scan it to link your account.',
+                    style: context.textStyles.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
+          // Linked account section for Kazoku (parent) users
           if (!session.isKodomo) ...[
             Text('Linked account',
                 style: context.textStyles.titleLarge
@@ -117,7 +181,7 @@ class ProfilePage extends StatelessWidget {
                         icon: Icons.person_add_alt_1_rounded,
                         onPressed: session.hasLinkedChild
                             ? null
-                            : () => _showLinkAccountDialog(context),
+                            : () => context.go(AppRoutes.linkAccount),
                       ),
                       SubtleOutlineButton(
                         label: 'Unlink',
@@ -192,57 +256,6 @@ class ProfilePage extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 14),
               splashFactory: NoSplash.splashFactory,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLinkAccountDialog(BuildContext context) {
-    final accountController = TextEditingController();
-    final passwordController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Link Account'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: accountController,
-              decoration: const InputDecoration(
-                labelText: 'Account ID / Email',
-                prefixIcon: Icon(Icons.person_outline_rounded),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                prefixIcon: Icon(Icons.lock_outline_rounded),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (accountController.text.trim().isNotEmpty) {
-                // In a real app, verify credentials here
-                context
-                    .read<AppSession>()
-                    .linkChild(childName: accountController.text.trim());
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Link'),
           ),
         ],
       ),
