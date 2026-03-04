@@ -2,11 +2,11 @@
 
 /// User role determining app behavior
 enum UserRole {
-  /// Child being tracked (Kodomo)
-  kodomo,
+  /// Child being tracked (Child)
+  child,
 
-  /// Parent viewing tracked child (Kazoku)
-  kazoku,
+  /// Parent viewing tracked child (Parent)
+  parent,
 }
 
 /// Coordinate log entry
@@ -73,7 +73,7 @@ class CoordinateLog {
       'CoordinateLog(x: $xCord, y: $yCord, time: $loggedTime, synced: $synced)';
 }
 
-/// Linked child account (for Kazoku mode)
+/// Linked child account (for Parent mode)
 class LinkedChild {
   final String odemoId;
   final String displayName;

@@ -6,7 +6,7 @@ import '../utils/settings.dart';
 /// HTTP client for GPS Tracker backend
 class ApiService {
   static String? _baseUrl;
-  
+
   static Future<String> get baseUrl async {
     if (_baseUrl == null) {
       final settings = await Settings.instance;
@@ -42,7 +42,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // Send Coordinates (Kodomo)
+  // Send Coordinates (Child)
   // =========================================================================
 
   /// Send coordinates to server
@@ -69,7 +69,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // Sync & Fetch (Kazoku)
+  // Sync & Fetch (Parent)
   // =========================================================================
 
   /// Resume sync from a specific timestamp

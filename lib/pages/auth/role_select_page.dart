@@ -7,7 +7,7 @@ import 'package:gpstracking/theme.dart';
 import 'package:gpstracking/ui/app_widgets.dart';
 import 'package:provider/provider.dart';
 
-/// Role selection page - choose between Kodomo (being tracked) or Kazoku (tracking)
+/// Role selection page - choose between Child (being tracked) or Parent (tracking)
 class RoleSelectPage extends StatelessWidget {
   const RoleSelectPage({super.key});
 
@@ -37,10 +37,10 @@ class RoleSelectPage extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.xl),
 
-              // Kodomo option
+              // Child option
               GradientCard(
                 onTap: () {
-                  session.setRole(UserRole.kodomo);
+                  session.setRole(UserRole.child);
                   context.go(AppRoutes.dashboard);
                 },
                 child: Row(
@@ -67,7 +67,7 @@ class RoleSelectPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Share your location with family members (Kodomo mode)',
+                            'Share your location with family members (Child mode)',
                             style: context.textStyles.bodyMedium
                                 ?.copyWith(color: scheme.onSurfaceVariant),
                           ),
@@ -82,10 +82,10 @@ class RoleSelectPage extends StatelessWidget {
 
               const SizedBox(height: AppSpacing.md),
 
-              // Kazoku option
+              // Parent option
               GradientCard(
                 onTap: () {
-                  session.setRole(UserRole.kazoku);
+                  session.setRole(UserRole.parent);
                   context.go(AppRoutes.dashboard);
                 },
                 child: Row(
@@ -112,7 +112,7 @@ class RoleSelectPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'View locations of linked family members (Kazoku mode)',
+                            'View locations of linked family members (Parent mode)',
                             style: context.textStyles.bodyMedium
                                 ?.copyWith(color: scheme.onSurfaceVariant),
                           ),
@@ -136,7 +136,8 @@ class RoleSelectPage extends StatelessWidget {
                       context.go(AppRoutes.welcome);
                     }
                   },
-                  icon: Icon(Icons.logout_rounded, color: scheme.onSurfaceVariant),
+                  icon: Icon(Icons.logout_rounded,
+                      color: scheme.onSurfaceVariant),
                   label: Text(
                     'Sign out',
                     style: context.textStyles.labelLarge

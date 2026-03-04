@@ -28,12 +28,12 @@ class AppSession extends ChangeNotifier {
   UserRole? _role;
 
   UserRole? get role => _role;
-  bool get isKodomo => _role == UserRole.kodomo;
-  bool get isKazoku => _role == UserRole.kazoku;
+  bool get isChild => _role == UserRole.child;
+  bool get isParent => _role == UserRole.parent;
   bool get hasRole => _role != null;
 
   // =========================================================================
-  // Tracking State (Kodomo mode)
+  // Tracking State (Child mode)
   // =========================================================================
 
   bool _trackingActive = false;
@@ -47,7 +47,7 @@ class AppSession extends ChangeNotifier {
   int get backupCount => _backupCount;
 
   // =========================================================================
-  // Linked Children (Kazoku mode)
+  // Linked Children (Parent mode)
   // =========================================================================
 
   List<LinkedChild> _linkedChildren = [];
@@ -96,7 +96,7 @@ class AppSession extends ChangeNotifier {
       // Restore role if saved
       final roleStr = _authService.role;
       if (roleStr != null) {
-        _role = roleStr == 'kodomo' ? UserRole.kodomo : UserRole.kazoku;
+        _role = roleStr == 'child' ? UserRole.child : UserRole.parent;
       }
 
       notifyListeners();
@@ -121,7 +121,7 @@ class AppSession extends ChangeNotifier {
         // Restore role if saved
         final roleStr = user['role'];
         if (roleStr != null) {
-          _role = roleStr == 'kodomo' ? UserRole.kodomo : UserRole.kazoku;
+          _role = roleStr == 'child' ? UserRole.child : UserRole.parent;
         }
 
         notifyListeners();
@@ -159,7 +159,7 @@ class AppSession extends ChangeNotifier {
 
     final roleStr = user['role'];
     if (roleStr != null) {
-      _role = roleStr == 'kodomo' ? UserRole.kodomo : UserRole.kazoku;
+      _role = roleStr == 'child' ? UserRole.child : UserRole.parent;
     }
 
     notifyListeners();
@@ -216,7 +216,7 @@ class AppSession extends ChangeNotifier {
   void setRole(UserRole role) {
     _role = role;
     // Save role to backend
-    _authService.updateRole(role == UserRole.kodomo ? 'kodomo' : 'kazoku');
+    _authService.updateRole(role == UserRole.child ? 'child' : 'parent');
     notifyListeners();
   }
 
@@ -227,7 +227,7 @@ class AppSession extends ChangeNotifier {
   }
 
   // =========================================================================
-  // Tracking Methods (Kodomo)
+  // Tracking Methods (Child)
   // =========================================================================
 
   /// Update tracking status
@@ -255,7 +255,7 @@ class AppSession extends ChangeNotifier {
   }
 
   // =========================================================================
-  // Linked Children Methods (Kazoku)
+  // Linked Children Methods (Parent)
   // =========================================================================
 
   /// Add a linked child

@@ -9,7 +9,7 @@ import 'package:gpstracking/ui/app_widgets.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
-/// Live map page for Kazoku mode - view tracked locations
+/// Live map page for Parent mode - view tracked locations
 class LiveMapPage extends StatefulWidget {
   const LiveMapPage({super.key});
 
@@ -51,9 +51,9 @@ class _LiveMapPageState extends State<LiveMapPage> {
   Future<void> _loadCoordinates() async {
     final session = context.read<AppSession>();
 
-    // For Kazoku mode, use selected child's ID; otherwise use own ID
+    // For Parent mode, use selected child's ID; otherwise use own ID
     String? targetId;
-    if (session.isKazoku && session.selectedChildId != null) {
+    if (session.isParent && session.selectedChildId != null) {
       targetId = session.selectedChildId;
     } else {
       targetId = session.userId;
@@ -112,7 +112,7 @@ class _LiveMapPageState extends State<LiveMapPage> {
                         ?.copyWith(color: scheme.onSurface),
                   ),
                   const Spacer(),
-                  if (session.isKazoku && session.linkedChildren.isNotEmpty)
+                  if (session.isParent && session.linkedChildren.isNotEmpty)
                     _ChildSelector(
                       children: session.linkedChildren,
                       selectedId: session.selectedChildId,

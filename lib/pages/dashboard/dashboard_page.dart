@@ -81,20 +81,20 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     final session = context.watch<AppSession>();
 
-    if (session.isKodomo) {
-      return _buildKodomoDashboard(context, session);
-    } else if (session.isKazoku) {
-      return _buildKazokuDashboard(context, session);
+    if (session.isChild) {
+      return _buildChildDashboard(context, session);
+    } else if (session.isParent) {
+      return _buildParentDashboard(context, session);
     } else {
       return _buildDefaultDashboard(context, session);
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Kodomo Dashboard
+  // Child Dashboard
   // ---------------------------------------------------------------------------
 
-  Widget _buildKodomoDashboard(BuildContext context, AppSession session) {
+  Widget _buildChildDashboard(BuildContext context, AppSession session) {
     final scheme = Theme.of(context).colorScheme;
 
     return SafeArea(
@@ -102,7 +102,7 @@ class _DashboardPageState extends State<DashboardPage> {
         padding: AppSpacing.paddingLg,
         children: [
           Text(
-            'Kodomo Dashboard',
+            'Child Dashboard',
             style: context.textStyles.headlineLarge
                 ?.copyWith(color: scheme.onSurface),
           ),
@@ -243,10 +243,10 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Kazoku Dashboard
+  // Parent Dashboard
   // ---------------------------------------------------------------------------
 
-  Widget _buildKazokuDashboard(BuildContext context, AppSession session) {
+  Widget _buildParentDashboard(BuildContext context, AppSession session) {
     final scheme = Theme.of(context).colorScheme;
 
     return SafeArea(
@@ -254,7 +254,7 @@ class _DashboardPageState extends State<DashboardPage> {
         padding: AppSpacing.paddingLg,
         children: [
           Text(
-            'Kazoku Dashboard',
+            'Parent Dashboard',
             style: context.textStyles.headlineLarge
                 ?.copyWith(color: scheme.onSurface),
           ),

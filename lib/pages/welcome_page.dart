@@ -171,17 +171,17 @@ class _WelcomePageState extends State<WelcomePage> {
             _RoleOption(
               icon: Icons.location_on_rounded,
               title: "I'm being tracked",
-              subtitle: "Kodomo Mode",
+              subtitle: "Child Mode",
               color: Theme.of(context).colorScheme.primary, // Yellow/Gold
-              onTap: () => _finalizeSignUp(context, user, UserRole.kodomo),
+              onTap: () => _finalizeSignUp(context, user, UserRole.child),
             ),
             const SizedBox(height: AppSpacing.md),
             _RoleOption(
               icon: Icons.visibility_rounded,
               title: "I'm tracking someone",
-              subtitle: "Kazoku Mode",
+              subtitle: "Parent Mode",
               color: Theme.of(context).colorScheme.tertiary, // Orange
-              onTap: () => _finalizeSignUp(context, user, UserRole.kazoku),
+              onTap: () => _finalizeSignUp(context, user, UserRole.parent),
             ),
           ],
         ),
@@ -207,7 +207,7 @@ class _WelcomePageState extends State<WelcomePage> {
     session.completeSignIn(user);
     session.setRole(role); // Ensure role is set in session
 
-    if (role == UserRole.kazoku) {
+    if (role == UserRole.parent) {
       // Navigate to Dashboard but show Link Dialog
       // We can use a post-frame callback or simple navigation argument?
       // Since router takes over, we can't easily pass args to dashboard via GoRouter

@@ -58,8 +58,8 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          // QR Code section for Kodomo (child) users
-          if (session.isKodomo) ...[
+          // QR Code section for Child (child) users
+          if (session.isChild) ...[
             Text('Your QR Code',
                 style: context.textStyles.titleLarge
                     ?.copyWith(color: scheme.onSurface)),
@@ -120,8 +120,8 @@ class ProfilePage extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.lg),
           ],
-          // Linked account section for Kazoku (parent) users
-          if (!session.isKodomo) ...[
+          // Linked account section for Parent (parent) users
+          if (!session.isChild) ...[
             Text('Linked account',
                 style: context.textStyles.titleLarge
                     ?.copyWith(color: scheme.onSurface)),
