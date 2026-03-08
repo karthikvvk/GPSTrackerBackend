@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "691296148761",
-    "project_id": "gpstracker-7cb86",
-    "storage_bucket": "gpstracker-7cb86.firebasestorage.app"
+    "project_number": "820679262470",
+    "project_id": "gpsapp-97718",
+    "storage_bucket": "gpsapp-97718.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:691296148761:android:f095d9749415a8f40fb988",
+        "mobilesdk_app_id": "1:820679262470:android:76506cc32f0474bfb39e87",
         "android_client_info": {
           "package_name": "com.example.gpstracking"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAE-AB2FvnfSweXUJQ65UTx3m4F5CzwIsI"
+          "current_key": "AIzaSyB8ihyKa9LdWyfcbP979TNvvTVWYGmgqa4"
         }
       ],
       "services": {
