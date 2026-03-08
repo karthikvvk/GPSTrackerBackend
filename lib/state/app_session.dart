@@ -295,16 +295,29 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  /// UI-only helper: simulates linking to a child account (from original)
-  void linkChild({required String childName}) {
+  /// Link a child account by name and userId.
+  void linkChild({required String childName, required String childUserId}) {
     final trimmed = childName.trim();
     _linkedChildName = trimmed.isEmpty ? null : trimmed;
+
+    // Also register as a proper LinkedChild so data-fetching works
+    final alreadyLinked = _linkedChildren.any((c) => c.odemoId == childUserId);
+    if (!alreadyLinked && trimmed.isNotEmpty) {
+      _linkedChildren.add(LinkedChild(
+        odemoId: childUserId,
+        displayName: trimmed,
+        email: trimmed,
+      ));
+    }
+    _selectedChildId = childUserId;
     notifyListeners();
   }
 
-  /// UI-only helper: removes the linked child account (from original)
+  /// Removes the linked child account.
   void unlinkChild() {
     _linkedChildName = null;
+    _linkedChildren.clear();
+    _selectedChildId = null;
     notifyListeners();
   }
   // =========================================================================

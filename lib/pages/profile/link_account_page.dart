@@ -60,6 +60,7 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
 
             // Show success and auto-link if valid
             if (linkToken.startsWith('kodomo_link_')) {
+              final childUserId = linkToken.replaceFirst('kodomo_link_', '');
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Child account found: $email'),
@@ -69,7 +70,10 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
               // Auto-trigger link after a short delay
               Future.delayed(const Duration(milliseconds: 500), () {
                 if (mounted && email.isNotEmpty) {
-                  context.read<AppSession>().linkChild(childName: email);
+                  context.read<AppSession>().linkChild(
+                        childName: email,
+                        childUserId: childUserId,
+                      );
                   context.pop();
                 }
               });
@@ -225,8 +229,14 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                         onPressed: () {
                           if (_accountController.text.trim().isNotEmpty &&
                               _passwordController.text.trim().isNotEmpty) {
+                            final pwd = _passwordController.text.trim();
+                            final childUserId = pwd.startsWith('kodomo_link_')
+                                ? pwd.replaceFirst('kodomo_link_', '')
+                                : pwd;
                             context.read<AppSession>().linkChild(
-                                childName: _accountController.text.trim());
+                                  childName: _accountController.text.trim(),
+                                  childUserId: childUserId,
+                                );
                             context.pop();
                           }
                         },
