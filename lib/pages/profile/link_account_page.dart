@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:gpstracking/nav.dart';
 import 'package:gpstracking/state/app_session.dart';
 import 'package:gpstracking/theme.dart';
 import 'package:gpstracking/ui/app_widgets.dart';
@@ -74,7 +75,7 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                         childName: email,
                         childUserId: childUserId,
                       );
-                  context.pop();
+                  context.go(AppRoutes.dashboard);
                 }
               });
             } else {
@@ -237,7 +238,7 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                                   childName: _accountController.text.trim(),
                                   childUserId: childUserId,
                                 );
-                            context.pop();
+                            context.go(AppRoutes.dashboard);
                           }
                         },
                       ),
