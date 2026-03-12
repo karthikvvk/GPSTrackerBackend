@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'models.dart';
@@ -5,6 +6,7 @@ import 'models.dart';
 /// SQLite database for offline-first location storage
 class LocalDb {
   static Database? _database;
+  static Completer<Database>? _initCompleter;
   static const String _dbName = 'gpstracker.db';
   static const int _dbVersion = 3;
 
@@ -12,10 +14,22 @@ class LocalDb {
   static const String _logsTable = 'coordinate_logs';
   static const String _backupTable = 'backup_logs';
 
-  /// Get database instance (singleton)
+  /// Get database instance (singleton, safe against concurrent init)
   static Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDb();
+
+    // If another caller is already initialising, wait for it
+    if (_initCompleter != null) return _initCompleter!.future;
+
+    _initCompleter = Completer<Database>();
+    try {
+      _database = await _initDb();
+      _initCompleter!.complete(_database!);
+    } catch (e) {
+      _initCompleter!.completeError(e);
+      _initCompleter = null;
+      rethrow;
+    }
     return _database!;
   }
 
@@ -247,6 +261,7 @@ class LocalDb {
     if (_database != null) {
       await _database!.close();
       _database = null;
+      _initCompleter = null;
     }
   }
 

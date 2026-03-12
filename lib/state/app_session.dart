@@ -2,6 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/services/auth_service.dart';
+import 'package:gpstracking/services/background_service.dart';
+import 'package:gpstracking/services/location_service.dart';
+import 'package:gpstracking/utils/location_helper.dart';
 
 /// App session state - manages authentication, role, and tracking state
 class AppSession extends ChangeNotifier {
@@ -40,11 +43,14 @@ class AppSession extends ChangeNotifier {
   CoordinateLog? _lastLocation;
   bool _serverUp = false;
   int _backupCount = 0;
+  LocationService? _locationService;
+  final List<String> _trackingLogs = [];
 
   bool get trackingActive => _trackingActive;
   CoordinateLog? get lastLocation => _lastLocation;
   bool get serverUp => _serverUp;
   int get backupCount => _backupCount;
+  List<String> get trackingLogs => List.unmodifiable(_trackingLogs);
 
   // =========================================================================
   // Linked Children (Parent mode)
@@ -251,6 +257,49 @@ class AppSession extends ChangeNotifier {
   /// Update backup count
   void setBackupCount(int count) {
     _backupCount = count;
+    notifyListeners();
+  }
+
+  /// Start location tracking (service lives here, survives page rebuilds).
+  ///
+  /// Pass a [BuildContext] so the user can be prompted with dialogs when
+  /// location services are off or permissions are missing.
+  Future<void> startTracking([BuildContext? context]) async {
+    if (_trackingActive || _userId == null) return;
+
+    // Ensure location services & permissions before starting
+    if (context != null) {
+      final ok = await ensureLocationEnabled(context);
+      if (!ok) return;
+    }
+
+    _locationService ??= LocationService(userId: _userId!);
+    _locationService!
+      ..onStatusUpdate = (msg) {
+        _trackingLogs.add(msg);
+        if (_trackingLogs.length > 50) _trackingLogs.removeAt(0);
+        notifyListeners();
+      }
+      ..onLocationUpdate = (log) {
+        _lastLocation = log;
+        notifyListeners();
+      };
+
+    await _locationService!.startTracking();
+    await BackgroundService.startService(_userId!);
+
+    _trackingActive = true;
+    _trackingLogs.add('Started tracking');
+    notifyListeners();
+  }
+
+  /// Stop location tracking
+  Future<void> stopTracking() async {
+    _locationService?.stopTracking();
+    await BackgroundService.stopService();
+
+    _trackingActive = false;
+    _trackingLogs.add('Stopped tracking');
     notifyListeners();
   }
 

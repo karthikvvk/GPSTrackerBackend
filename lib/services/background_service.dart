@@ -25,7 +25,8 @@ class BackgroundService {
     // Background service only works on Android and iOS
     if (!_isSupported) {
       if (kDebugMode) {
-        print('[BackgroundService] Skipping init - not supported on this platform');
+        print(
+            '[BackgroundService] Skipping init - not supported on this platform');
       }
       return;
     }
@@ -85,14 +86,14 @@ class BackgroundService {
     return await _service.isRunning();
   }
 
-  /// Entry point for background service
   @pragma('vm:entry-point')
   static Future<void> _onStart(ServiceInstance service) async {
     DartPluginRegistrant.ensureInitialized();
 
     String? userId;
     bool isTracking = false;
-    Timer? trackingTimer;
+    bool busy = false;
+    StreamSubscription<Position>? positionSub;
     final apiService = ApiService();
 
     // Listen for commands
@@ -105,7 +106,7 @@ class BackgroundService {
 
     service.on('stopService').listen((event) {
       isTracking = false;
-      trackingTimer?.cancel();
+      positionSub?.cancel();
       service.stopSelf();
     });
 
@@ -123,25 +124,25 @@ class BackgroundService {
 
     isTracking = true;
 
-    // Start tracking loop
-    trackingTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+    // Subscribe to a persistent position stream – single GPS context,
+    // no location-icon flicker, no overlapping concurrent calls.
+    // AndroidSettings with intervalDuration ensures periodic delivery
+    // even when stationary.
+    final settings = AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 0,
+      intervalDuration: const Duration(seconds: 1),
+    );
+
+    positionSub = Geolocator.getPositionStream(
+      locationSettings: settings,
+    ).listen((position) async {
       if (!isTracking || userId == null) return;
+      // Guard against re-entrant processing when async work is slow
+      if (busy) return;
+      busy = true;
 
       try {
-        // Check location permission
-        final permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied ||
-            permission == LocationPermission.deniedForever) {
-          return;
-        }
-
-        // Get current position
-        final position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-          ),
-        );
-
         // Check server status
         final serverUp = await apiService.checkServerStatus();
 
@@ -189,8 +190,14 @@ class BackgroundService {
         if (kDebugMode) {
           print('[BackgroundService] Error: $e');
         }
+      } finally {
+        busy = false;
       }
-    });
+    }, onError: (e) {
+      if (kDebugMode) {
+        print('[BackgroundService] Stream error: $e');
+      }
+    }, cancelOnError: false);
   }
 
   @pragma('vm:entry-point')

@@ -3,11 +3,10 @@ import 'package:go_router/go_router.dart';
 import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/nav.dart';
-import 'package:gpstracking/services/background_service.dart';
-import 'package:gpstracking/services/location_service.dart';
 import 'package:gpstracking/state/app_session.dart';
 import 'package:gpstracking/theme.dart';
 import 'package:gpstracking/ui/app_widgets.dart';
+import 'package:gpstracking/utils/location_helper.dart';
 import 'package:provider/provider.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -18,13 +17,15 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  LocationService? _locationService;
-  final List<String> _logs = [];
-
   @override
   void initState() {
     super.initState();
     _initBackupCount();
+
+    // Prompt the user to enable location on first load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ensureLocationEnabled(context);
+    });
   }
 
   Future<void> _initBackupCount() async {
@@ -34,47 +35,12 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  void _initLocationService(String userId) {
-    _locationService ??= LocationService(userId: userId)
-      ..onStatusUpdate = (msg) {
-        if (!mounted) return;
-        setState(() {
-          _logs.add(msg);
-          if (_logs.length > 50) {
-            _logs.removeAt(0);
-          }
-        });
-      }
-      ..onLocationUpdate = (log) {
-        if (!mounted) return;
-        context.read<AppSession>().updateLocation(log);
-      };
-  }
-
   Future<void> _startTracking() async {
-    final session = context.read<AppSession>();
-    if (session.userId == null) return;
-
-    _initLocationService(session.userId!);
-    await _locationService!.startTracking();
-    await BackgroundService.startService(session.userId!);
-
-    session.setTrackingActive(true);
-    setState(() => _logs.add('Started tracking'));
+    await context.read<AppSession>().startTracking(context);
   }
 
   Future<void> _stopTracking() async {
-    _locationService?.stopTracking();
-    await BackgroundService.stopService();
-
-    context.read<AppSession>().setTrackingActive(false);
-    setState(() => _logs.add('Stopped tracking'));
-  }
-
-  @override
-  void dispose() {
-    _locationService?.dispose();
-    super.dispose();
+    await context.read<AppSession>().stopTracking();
   }
 
   @override
@@ -204,7 +170,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          if (_logs.isNotEmpty) ...[
+          if (session.trackingLogs.isNotEmpty) ...[
             Text(
               'Activity Log',
               style: context.textStyles.titleMedium
@@ -222,9 +188,10 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               child: ListView.builder(
                 reverse: true,
-                itemCount: _logs.length,
+                itemCount: session.trackingLogs.length,
                 itemBuilder: (context, index) {
-                  final log = _logs[_logs.length - 1 - index];
+                  final logs = session.trackingLogs;
+                  final log = logs[logs.length - 1 - index];
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(

@@ -10,8 +10,9 @@ class LocationService {
   final ApiService _apiService;
   final String userId;
 
-  Timer? _trackingTimer;
+  StreamSubscription<Position>? _positionSubscription;
   bool _isTracking = false;
+  bool _busy = false;
   bool _serverUp = false;
   bool _lastServerUp = false;
 
@@ -64,33 +65,42 @@ class LocationService {
     _isTracking = true;
     _log('🔄 Started tracking...');
 
-    // Start the timer for periodic tracking
-    _trackingTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => _trackingLoop(),
+    // Subscribe to a persistent position stream – keeps a single GPS
+    // context alive so the location icon stays steady (no flicker).
+    // AndroidSettings with intervalDuration ensures periodic delivery
+    // even when stationary (generic LocationSettings won't push updates
+    // on Android if distanceFilter is 0 and device doesn't move).
+    final settings = AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 0,
+      intervalDuration: const Duration(seconds: 1),
     );
 
-    // Run immediately
-    await _trackingLoop();
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: settings,
+    ).listen(
+      (position) => _handlePosition(position),
+      onError: (e) => _log('📍 Stream error: $e'),
+      cancelOnError: false,
+    );
   }
 
   /// Stop tracking
   void stopTracking() {
     _isTracking = false;
-    _trackingTimer?.cancel();
-    _trackingTimer = null;
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
     _log('⏹️ Stopped tracking');
   }
 
-  /// Main tracking loop - mirrors TrackerLoop.kt logic
-  Future<void> _trackingLoop() async {
+  /// Handle an incoming position from the stream
+  Future<void> _handlePosition(Position position) async {
     if (!_isTracking) return;
+    // Guard against re-entrant processing when async work is slow
+    if (_busy) return;
+    _busy = true;
 
     try {
-      // Get current location
-      final position = await _getCurrentLocation();
-      if (position == null) return;
-
       // Check server status
       await _checkServerStatus();
 
@@ -115,7 +125,8 @@ class LocationService {
         final sent = await _apiService.sendCoords(userId, [coord]);
         if (sent) {
           await LocalDb.insertLog(coord);
-          _log('✅ Sent: (${coord.xCord.toStringAsFixed(4)}, ${coord.yCord.toStringAsFixed(4)})');
+          _log(
+              '✅ Sent: (${coord.xCord.toStringAsFixed(4)}, ${coord.yCord.toStringAsFixed(4)})');
         } else {
           await _saveOffline(coord);
         }
@@ -126,21 +137,8 @@ class LocationService {
       onLocationUpdate?.call(coord);
     } catch (e) {
       _log('❌ Error: $e');
-    }
-  }
-
-  /// Get current GPS position
-  Future<Position?> _getCurrentLocation() async {
-    try {
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 0,
-        ),
-      );
-    } catch (e) {
-      _log('📍 Location error: $e');
-      return null;
+    } finally {
+      _busy = false;
     }
   }
 
@@ -154,7 +152,8 @@ class LocationService {
   Future<void> _saveOffline(CoordinateLog coord) async {
     await LocalDb.insertBackupLog(coord);
     await LocalDb.insertLog(coord);
-    _log('💾 Saved offline: (${coord.xCord.toStringAsFixed(4)}, ${coord.yCord.toStringAsFixed(4)})');
+    _log(
+        '💾 Saved offline: (${coord.xCord.toStringAsFixed(4)}, ${coord.yCord.toStringAsFixed(4)})');
   }
 
   /// Sync backup logs when server comes back online
@@ -181,6 +180,10 @@ class LocationService {
   }
 
   void dispose() {
+    // Clear callbacks BEFORE stopping to avoid calling setState on
+    // a defunct widget during the stopTracking _log call.
+    onStatusUpdate = null;
+    onLocationUpdate = null;
     stopTracking();
     _apiService.dispose();
   }
