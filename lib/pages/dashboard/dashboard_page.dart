@@ -22,9 +22,12 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     _initBackupCount();
 
-    // Prompt the user to enable location on first load
+    // Prompt location services only for child (tracking) users
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ensureLocationEnabled(context);
+      final session = context.read<AppSession>();
+      if (session.isChild) {
+        ensureLocationEnabled(context);
+      }
     });
   }
 

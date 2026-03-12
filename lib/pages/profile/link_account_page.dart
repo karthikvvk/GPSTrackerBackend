@@ -40,7 +40,12 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
     });
   }
 
-  void _onDetect(BarcodeCapture capture) {
+  bool _hasNavigated = false;
+
+  void _onDetect(BarcodeCapture capture) async {
+    // Guard: onDetect can fire multiple times before the scanner is closed.
+    if (_hasNavigated) return;
+
     final List<Barcode> barcodes = capture.barcodes;
     for (final barcode in barcodes) {
       if (barcode.rawValue != null) {
@@ -57,10 +62,26 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
           _passwordController.text = linkToken;
 
           if (mounted) {
-            _toggleScanner();
-
-            // Show success and auto-link if valid
+            // Auto-link if valid token
             if (linkToken.startsWith('kodomo_link_')) {
+              _hasNavigated = true;
+
+              // 1. Stop scanner immediately
+              _scannerController?.stop();
+
+              // 2. Remove the MobileScanner widget from the tree
+              setState(() {
+                _isScanning = false;
+              });
+
+              // 3. Dispose the controller (camera teardown)
+              _scannerController?.dispose();
+              _scannerController = null;
+
+              // 4. Wait a frame for the widget tree to settle
+              await Future.delayed(const Duration(milliseconds: 100));
+              if (!mounted) return;
+
               final childUserId = linkToken.replaceFirst('kodomo_link_', '');
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -68,17 +89,15 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                   backgroundColor: Theme.of(context).colorScheme.primary,
                 ),
               );
-              // Auto-trigger link after a short delay
-              Future.delayed(const Duration(milliseconds: 500), () {
-                if (mounted && email.isNotEmpty) {
-                  context.read<AppSession>().linkChild(
-                        childName: email,
-                        childUserId: childUserId,
-                      );
-                  context.go(AppRoutes.dashboard);
-                }
-              });
+
+              // 5. Link and navigate
+              context.read<AppSession>().linkChild(
+                    childName: email,
+                    childUserId: childUserId,
+                  );
+              context.go(AppRoutes.dashboard);
             } else {
+              _toggleScanner();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('QR Code Scanned!')),
               );

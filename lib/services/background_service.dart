@@ -10,6 +10,7 @@ import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/data/models.dart';
 
 /// Background service for persistent location tracking
+@pragma('vm:entry-point')
 class BackgroundService {
   static const String _channelId = 'gpstracker_channel';
   static const String _channelName = 'GPS Tracker Background';
