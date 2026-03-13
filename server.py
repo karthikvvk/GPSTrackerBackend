@@ -277,6 +277,7 @@ def handle_child_register(data):
     join_room(f'child_{user_id}')
     
     print(f'[WS] Child registered: {user_id} (sid={sid})')
+    print(f'[WS] Online children now: {list(connected_children.keys())}')
     emit('registered', {'status': 'ok', 'userId': user_id})
     
     # Notify any parents already watching this child that it came online
@@ -361,6 +362,9 @@ def handle_parent_subscribe(data):
     
     online = child_id in connected_children
     print(f'[WS] Parent {sid} subscribed to child {child_id} (online={online})')
+    print(f'[WS] Online children: {list(connected_children.keys())}')
+    if not online:
+        print(f'[WS] WARNING: child {child_id!r} is NOT in connected_children — check that the child sent child_register with this exact ID')
     
     emit('subscribed', {
         'childId': child_id,

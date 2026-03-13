@@ -16,6 +16,7 @@ class RelayService {
   String? _userId;
   bool _isChild = false;
   bool _connected = false;
+  String? _pendingChildId; // child to subscribe after connect (parent mode)
 
   // --- Streams for consumers ---
 
@@ -71,6 +72,10 @@ class RelayService {
 
       if (_isChild) {
         _registerAsChild();
+      } else if (_pendingChildId != null) {
+        // Subscribe now that the socket is actually open
+        _socket!.emit('parent_subscribe', {'childId': _pendingChildId});
+        if (kDebugMode) print('[RelayService] Subscribed to child: $_pendingChildId');
       }
     });
 
@@ -89,6 +94,8 @@ class RelayService {
       if (kDebugMode) print('[RelayService] Reconnected');
       if (_isChild) {
         _registerAsChild();
+      } else if (_pendingChildId != null) {
+        _socket!.emit('parent_subscribe', {'childId': _pendingChildId});
       }
     });
 
@@ -217,9 +224,14 @@ class RelayService {
   }
 
   /// Subscribe to a child's live location stream.
+  /// Stores [childId] so it can be re-sent after reconnects.
   void subscribeToChild(String childId) {
-    if (!_connected || _socket == null) return;
-    _socket!.emit('parent_subscribe', {'childId': childId});
+    _pendingChildId = childId;
+    if (_connected && _socket != null) {
+      _socket!.emit('parent_subscribe', {'childId': childId});
+      if (kDebugMode) print('[RelayService] Subscribed to child: $childId');
+    }
+    // else: onConnect will subscribe once the socket opens
   }
 
   /// Unsubscribe from the current child.

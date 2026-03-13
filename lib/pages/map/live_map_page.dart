@@ -94,29 +94,38 @@ class _LiveMapPageState extends State<LiveMapPage> {
               padding: AppSpacing.paddingMd,
               child: Row(
                 children: [
-                  Text(
-                    'Live Map',
-                    style: context.textStyles.headlineMedium
-                        ?.copyWith(color: scheme.onSurface),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  // Child online indicator
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color:
-                          session.childOnline ? Colors.green : scheme.outline,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text(
-                    session.childOnline ? 'Online' : 'Offline',
-                    style: context.textStyles.labelSmall?.copyWith(
-                      color: session.childOnline
-                          ? Colors.green
-                          : scheme.onSurfaceVariant,
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Live Map',
+                          style: context.textStyles.headlineMedium
+                              ?.copyWith(color: scheme.onSurface),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        // Child online indicator
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: session.childOnline
+                                ? Colors.green
+                                : scheme.outline,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text(
+                          session.childOnline ? 'Online' : 'Offline',
+                          style: context.textStyles.labelSmall?.copyWith(
+                            color: session.childOnline
+                                ? Colors.green
+                                : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const Spacer(),

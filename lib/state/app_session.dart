@@ -271,8 +271,14 @@ class AppSession extends ChangeNotifier {
       if (!ok) return;
     }
 
-    // Connect relay (WebSocket)
-    _relayService ??= RelayService();
+    // FIX: always tear down any existing relay (could be a stale parent-mode
+    // socket with _isChild=false from a previous connectAsParent call).
+    // Reusing it via ??= means child_register is never sent to the server.
+    _liveLocationSub?.cancel();
+    _childStatusSub?.cancel();
+    _relayService?.disconnect();
+    _relayService = RelayService();
+
     await _relayService!.connect(userId: _userId!, isChild: true);
 
     _locationService ??= LocationService(userId: _userId!);
@@ -300,26 +306,37 @@ class AppSession extends ChangeNotifier {
   Future<void> connectAsParent(String childId) async {
     if (_userId == null) return;
 
-    _relayService ??= RelayService();
-    await _relayService!.connect(userId: _userId!, isChild: false);
+    // FIX: idempotency guard — don't reconnect if already watching this child.
+    // Without this, every rebuild floods the server with connect/subscribe cycles.
+    if (_selectedChildId == childId && (_relayService?.isConnected ?? false)) {
+      return;
+    }
 
-    // Subscribe to child's live location
+    // Tear down any existing relay cleanly.
+    _liveLocationSub?.cancel();
+    _childStatusSub?.cancel();
+    _relayService?.disconnect();
+    _relayService = RelayService();
+
+    // Set _pendingChildId before connecting so the subscription fires
+    // inside onConnect — not before the socket is open.
     _relayService!.subscribeToChild(childId);
 
+    await _relayService!.connect(userId: _userId!, isChild: false);
+
     // Listen for live locations
-    _liveLocationSub?.cancel();
     _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
       _lastLocation = coord;
       notifyListeners();
     });
 
     // Listen for child online/offline status
-    _childStatusSub?.cancel();
     _childStatusSub = _relayService!.childStatusStream.listen((online) {
       _childOnline = online;
       notifyListeners();
     });
   }
+
 
   /// Stop location tracking (child) or relay connection
   Future<void> stopTracking() async {
