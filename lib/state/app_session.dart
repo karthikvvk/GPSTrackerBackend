@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/services/auth_service.dart';
 import 'package:gpstracking/services/background_service.dart';
@@ -197,6 +198,13 @@ class AppSession extends ChangeNotifier {
 
   /// Sign out
   Future<void> signOut() async {
+    // Stop tracking and disconnect relay before clearing state
+    _locationService?.stopTracking();
+    _liveLocationSub?.cancel();
+    _childStatusSub?.cancel();
+    _relayService?.disconnect();
+    _relayService = null;
+
     await _authService.signOut();
     _signedIn = false;
     _userId = null;
@@ -258,10 +266,30 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Start location tracking (child mode) or relay connection (parent mode).
+  // =========================================================================
+  // Child Relay Methods
+  // =========================================================================
+
+  /// Connect the child to the relay server and register as online.
   ///
-  /// Pass a [BuildContext] so the user can be prompted with dialogs when
-  /// location services are off or permissions are missing.
+  /// Call this when the child dashboard loads so the child appears "online"
+  /// to parents even before tracking is started (e.g. user is at home,
+  /// app is open but GPS sharing is off).
+  Future<void> connectChildRelay() async {
+    if (_userId == null || !isChild) return;
+    // Already connected as child — nothing to do.
+    if (_relayService != null && _relayService!.isConnected) return;
+
+    _relayService?.disconnect();
+    _relayService = RelayService();
+    await _relayService!.connect(userId: _userId!, isChild: true);
+    if (kDebugMode) print('[AppSession] Child relay connected (presence only)');
+  }
+
+  /// Start GPS location tracking (child mode).
+  ///
+  /// Reuses the relay connection if already established by [connectChildRelay].
+  /// Pass a [BuildContext] to prompt the user for location permissions.
   Future<void> startTracking([BuildContext? context]) async {
     if (_trackingActive || _userId == null) return;
 
@@ -271,15 +299,15 @@ class AppSession extends ChangeNotifier {
       if (!ok) return;
     }
 
-    // FIX: always tear down any existing relay (could be a stale parent-mode
-    // socket with _isChild=false from a previous connectAsParent call).
-    // Reusing it via ??= means child_register is never sent to the server.
-    _liveLocationSub?.cancel();
-    _childStatusSub?.cancel();
-    _relayService?.disconnect();
-    _relayService = RelayService();
-
-    await _relayService!.connect(userId: _userId!, isChild: true);
+    // Reuse the existing child-mode relay if it's already connected.
+    // Only tear down + recreate if the relay is missing or in parent mode.
+    if (_relayService == null || !_relayService!.isConnected) {
+      _liveLocationSub?.cancel();
+      _childStatusSub?.cancel();
+      _relayService?.disconnect();
+      _relayService = RelayService();
+      await _relayService!.connect(userId: _userId!, isChild: true);
+    }
 
     _locationService ??= LocationService(userId: _userId!);
     _locationService!.attachRelay(_relayService!);
@@ -324,10 +352,15 @@ class AppSession extends ChangeNotifier {
 
     await _relayService!.connect(userId: _userId!, isChild: false);
 
-    // Listen for live locations
+    // Listen for live locations and persist each one to local SQLite.
+    // This populates the History calendar on the parent device.
     _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
       _lastLocation = coord;
       notifyListeners();
+      // Fire-and-forget — save to local DB so history calendar shows data
+      LocalDb.insertLog(coord).catchError((e) {
+        if (kDebugMode) print('[AppSession] Failed to save relayed coord: $e');
+      });
     });
 
     // Listen for child online/offline status
@@ -338,13 +371,14 @@ class AppSession extends ChangeNotifier {
   }
 
 
-  /// Stop location tracking (child) or relay connection
+  /// Stop GPS tracking but keep the relay alive (child stays "online").
   Future<void> stopTracking() async {
     _locationService?.stopTracking();
     await BackgroundService.stopService();
-    _liveLocationSub?.cancel();
-    _childStatusSub?.cancel();
-    _relayService?.disconnect();
+
+    // Detach relay from location service so no more pushLocation calls,
+    // but keep the WebSocket open so the child stays visible as "online".
+    _locationService?.attachRelay(null);
 
     _trackingActive = false;
     _trackingLogs.add('Stopped tracking');

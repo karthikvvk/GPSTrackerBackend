@@ -20,10 +20,13 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
 
-    // Prompt location services only for child (tracking) users
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final session = context.read<AppSession>();
       if (session.isChild) {
+        // Register with relay immediately so the child appears "online"
+        // to parents even before tracking is started.
+        session.connectChildRelay();
+        // Prompt for location services so the user can start tracking.
         ensureLocationEnabled(context);
       }
     });

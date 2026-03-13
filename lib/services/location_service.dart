@@ -28,8 +28,9 @@ class LocationService {
 
   bool get isTracking => _isTracking;
 
-  /// Attach a relay service for real-time streaming to parents.
-  void attachRelay(RelayService relay) {
+  /// Attach (or detach) a relay service for real-time streaming to parents.
+  /// Pass null to detach without closing the socket.
+  void attachRelay(RelayService? relay) {
     _relayService = relay;
   }
 
