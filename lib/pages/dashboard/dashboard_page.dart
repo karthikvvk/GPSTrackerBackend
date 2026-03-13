@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/nav.dart';
 import 'package:gpstracking/state/app_session.dart';
@@ -20,7 +19,6 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    _initBackupCount();
 
     // Prompt location services only for child (tracking) users
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -29,13 +27,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ensureLocationEnabled(context);
       }
     });
-  }
-
-  Future<void> _initBackupCount() async {
-    final count = await LocalDb.getBackupCount();
-    if (mounted) {
-      context.read<AppSession>().setBackupCount(count);
-    }
   }
 
   Future<void> _startTracking() async {
@@ -128,20 +119,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     ],
                   ),
                 ),
-                if (session.backupCount > 0)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: scheme.errorContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${session.backupCount} offline',
-                      style: context.textStyles.labelSmall
-                          ?.copyWith(color: scheme.onErrorContainer),
-                    ),
-                  ),
+
               ],
             ),
           ),

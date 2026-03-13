@@ -5,11 +5,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:gpstracking/data/api_service.dart';
 import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/data/models.dart';
 
-/// Background service for persistent location tracking
+/// Background service for persistent location tracking.
+///
+/// In the relay architecture, the background service only writes to local
+/// SQLite — no server writes. Live relay happens via [RelayService] in the
+/// foreground isolate only (WebSocket connections don't survive isolate
+/// boundaries).
 @pragma('vm:entry-point')
 class BackgroundService {
   static const String _channelId = 'gpstracker_channel';
@@ -23,7 +27,6 @@ class BackgroundService {
 
   /// Initialize the background service
   static Future<void> initialize() async {
-    // Background service only works on Android and iOS
     if (!_isSupported) {
       if (kDebugMode) {
         print(
@@ -95,7 +98,6 @@ class BackgroundService {
     bool isTracking = false;
     bool busy = false;
     StreamSubscription<Position>? positionSub;
-    final apiService = ApiService();
 
     // Listen for commands
     service.on('setUserId').listen((event) {
@@ -120,15 +122,11 @@ class BackgroundService {
       );
     }
 
-    // Wait a bit for user ID to be set
+    // Wait for user ID to be set
     await Future.delayed(const Duration(milliseconds: 500));
 
     isTracking = true;
 
-    // Subscribe to a persistent position stream – single GPS context,
-    // no location-icon flicker, no overlapping concurrent calls.
-    // AndroidSettings with intervalDuration ensures periodic delivery
-    // even when stationary.
     final settings = AndroidSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 0,
@@ -139,37 +137,21 @@ class BackgroundService {
       locationSettings: settings,
     ).listen((position) async {
       if (!isTracking || userId == null) return;
-      // Guard against re-entrant processing when async work is slow
       if (busy) return;
       busy = true;
 
       try {
-        // Check server status
-        final serverUp = await apiService.checkServerStatus();
-
-        // Create log
         final now = DateTime.now().toUtc().toIso8601String();
         final coord = CoordinateLog(
           xCord: position.latitude,
           yCord: position.longitude,
           loggedTime: now,
           userId: userId,
-          synced: serverUp,
+          synced: true,
         );
 
-        // Handle based on server status
-        if (serverUp) {
-          final sent = await apiService.sendCoords(userId!, [coord]);
-          if (sent) {
-            await LocalDb.insertLog(coord);
-          } else {
-            await LocalDb.insertBackupLog(coord);
-            await LocalDb.insertLog(coord);
-          }
-        } else {
-          await LocalDb.insertBackupLog(coord);
-          await LocalDb.insertLog(coord);
-        }
+        // Save to local SQLite only (no server writes)
+        await LocalDb.insertLog(coord);
 
         // Update notification with latest position
         if (service is AndroidServiceInstance) {
@@ -180,12 +162,11 @@ class BackgroundService {
           );
         }
 
-        // Send update to UI
+        // Send update to UI (foreground isolate picks this up for relay)
         service.invoke('update', {
           'latitude': position.latitude,
           'longitude': position.longitude,
           'time': now,
-          'serverUp': serverUp,
         });
       } catch (e) {
         if (kDebugMode) {

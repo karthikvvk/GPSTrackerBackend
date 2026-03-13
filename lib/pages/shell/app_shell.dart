@@ -35,12 +35,7 @@ class AppShell extends StatelessWidget {
     final index = _indexForLocation(location);
 
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: KeyedSubtree(key: ValueKey(location), child: child),
-      ),
+      body: child,
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(

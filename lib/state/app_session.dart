@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/services/auth_service.dart';
 import 'package:gpstracking/services/background_service.dart';
 import 'package:gpstracking/services/location_service.dart';
+import 'package:gpstracking/services/relay_service.dart';
 import 'package:gpstracking/utils/location_helper.dart';
 
 /// App session state - manages authentication, role, and tracking state
@@ -41,15 +43,17 @@ class AppSession extends ChangeNotifier {
 
   bool _trackingActive = false;
   CoordinateLog? _lastLocation;
-  bool _serverUp = false;
-  int _backupCount = 0;
+  bool _childOnline = false;
   LocationService? _locationService;
+  RelayService? _relayService;
+  StreamSubscription? _liveLocationSub;
+  StreamSubscription? _childStatusSub;
   final List<String> _trackingLogs = [];
 
   bool get trackingActive => _trackingActive;
   CoordinateLog? get lastLocation => _lastLocation;
-  bool get serverUp => _serverUp;
-  int get backupCount => _backupCount;
+  bool get childOnline => _childOnline;
+  RelayService? get relayService => _relayService;
   List<String> get trackingLogs => List.unmodifiable(_trackingLogs);
 
   // =========================================================================
@@ -248,19 +252,13 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Update server status
-  void setServerUp(bool up) {
-    _serverUp = up;
+  /// Update child online status (parent mode)
+  void setChildOnline(bool online) {
+    _childOnline = online;
     notifyListeners();
   }
 
-  /// Update backup count
-  void setBackupCount(int count) {
-    _backupCount = count;
-    notifyListeners();
-  }
-
-  /// Start location tracking (service lives here, survives page rebuilds).
+  /// Start location tracking (child mode) or relay connection (parent mode).
   ///
   /// Pass a [BuildContext] so the user can be prompted with dialogs when
   /// location services are off or permissions are missing.
@@ -273,7 +271,12 @@ class AppSession extends ChangeNotifier {
       if (!ok) return;
     }
 
+    // Connect relay (WebSocket)
+    _relayService ??= RelayService();
+    await _relayService!.connect(userId: _userId!, isChild: true);
+
     _locationService ??= LocationService(userId: _userId!);
+    _locationService!.attachRelay(_relayService!);
     _locationService!
       ..onStatusUpdate = (msg) {
         _trackingLogs.add(msg);
@@ -293,10 +296,38 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Stop location tracking
+  /// Connect relay as parent and subscribe to a child's live stream.
+  Future<void> connectAsParent(String childId) async {
+    if (_userId == null) return;
+
+    _relayService ??= RelayService();
+    await _relayService!.connect(userId: _userId!, isChild: false);
+
+    // Subscribe to child's live location
+    _relayService!.subscribeToChild(childId);
+
+    // Listen for live locations
+    _liveLocationSub?.cancel();
+    _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
+      _lastLocation = coord;
+      notifyListeners();
+    });
+
+    // Listen for child online/offline status
+    _childStatusSub?.cancel();
+    _childStatusSub = _relayService!.childStatusStream.listen((online) {
+      _childOnline = online;
+      notifyListeners();
+    });
+  }
+
+  /// Stop location tracking (child) or relay connection
   Future<void> stopTracking() async {
     _locationService?.stopTracking();
     await BackgroundService.stopService();
+    _liveLocationSub?.cancel();
+    _childStatusSub?.cancel();
+    _relayService?.disconnect();
 
     _trackingActive = false;
     _trackingLogs.add('Stopped tracking');

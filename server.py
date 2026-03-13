@@ -3,7 +3,7 @@ from flask_pymongo import PyMongo
 from datetime import datetime, timezone
 from pymongo import MongoClient
 from flask_cors import CORS
-import queue
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import os
 import json
 from pymongo.server_api import ServerApi
@@ -32,22 +32,27 @@ users_collection = mongo_db["ourusers"]
 
 app = Flask(__name__)
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
+# =============================================================================
+# Connected clients tracking
+# =============================================================================
 
+# Maps userId -> sid (session ID) for online children
+connected_children = {}
+# Maps sid -> userId for reverse lookup
+sid_to_child = {}
+# Maps parentSid -> childId for active subscriptions
+parent_subscriptions = {}
 
-# Shared state
-track_active = False  # global flag
-sync_queue = queue.Queue()
-
-def get_today_collection():
-    return datetime.now(timezone.utc).strftime("%Y_%m_%d")
 
 def is_date_collection(name):
     """Check if collection name is in YYYY_MM_DD format"""
     return bool(re.match(r'^\d{4}_\d{2}_\d{2}$', name))
 
+
 # =============================================================================
-# Auth Endpoints
+# Auth Endpoints (REST - unchanged)
 # =============================================================================
 
 @app.route('/auth/register', methods=['POST'])
@@ -199,183 +204,240 @@ def update_profile():
 
 
 # =============================================================================
-# GPS Tracking Endpoints (updated to use userid instead of firebaseid)
+# REST - Server & Relay Status
 # =============================================================================
-
-@app.route('/send', methods=['POST'])
-def send_data():
-    data = request.get_json()
-    if not data or "userid" not in data or "coords" not in data or not isinstance(data["coords"], list):
-        return jsonify({"status": "error", "message": "Invalid payload"}), 400
-    userid = data["userid"]
-    coords = data["coords"]
-
-    collection_name = datetime.now(timezone.utc).strftime("%Y_%m_%d")
-    collection = mongo_db[collection_name]
-
-    valid_coords = []
-    for coord in coords:
-        if 'x_cord' in coord and 'y_cord' in coord:
-            coord_doc = {
-                "userid": userid,
-                "x_cord": coord["x_cord"],
-                "y_cord": coord["y_cord"],
-                "logged_time": datetime.now(timezone.utc)
-            }
-            valid_coords.append(coord_doc)
-
-            # Still add to sync queue ONLY if tracking is on
-            if track_active:
-                sync_queue.put(coord_doc)
-
-    if valid_coords:
-        collection.insert_many(valid_coords)
-
-
-    return jsonify({
-        "status": "success",
-        "inserted": len(valid_coords),
-        "track_active": track_active
-    })
-
-@app.route('/sync', methods=['POST'])
-def sync_resume():
-    data = request.get_json()
-    if not data or 'last_synced_timestamp' not in data:
-        return jsonify({"status": "error", "message": "Missing 'last_synced_timestamp'"}), 400
-
-    try:
-        # Handle 'Z' (Zulu/UTC) and convert to aware datetime
-        last_ts = datetime.fromisoformat(data['last_synced_timestamp'].replace("Z", "+00:00"))
-        userid = data["userid"]
-
-    except Exception as e:
-        return jsonify({"status": "error", "message": "Invalid timestamp format"}), 400
-
-
-
-    date_docs = list(mongo_db.list_collection_names())
-    date_docs.sort()
-
-    # Include today as well
-    today_str = get_today_collection()
-    if today_str not in date_docs:
-        date_docs.append(today_str)
-
-    sync_data = []
-    found = False
-
-    for date_str in date_docs:
-        collection = mongo_db[date_str]
-
-        # force collection create
-        if collection.estimated_document_count() == 0:
-            collection.insert_one({
-                "x_cord": 0,
-                "y_cord": 0,
-                "logged_time": datetime.now(timezone.utc),
-                "dummy": True,
-                "userid": "userid",
-            })
-
-        if not found:
-            # Search for the timestamp
-            match = collection.find_one({"userid": userid,"logged_time": {"$gte": last_ts}}, sort=[("logged_time", 1)])
-            if match:
-                found = True
-                # Now get all data from this timestamp onwards
-                cursor = collection.find({"userid": userid,"logged_time": {"$gte": last_ts}}, {"_id": 0})
-                sync_data.extend(list(cursor))
-        else:
-            # Already found; get all data from the next collections
-            cursor = collection.find({"userid": userid}, {"_id": 0})
-            sync_data.extend(list(cursor))
-
-        collection.delete_many({"dummy": True})
-
-
-    return jsonify({"status": "success", "synced_data": sync_data})
-
-@app.route('/viewtoday', methods=['GET'])
-def view_today():
-    userid = request.args.get("userid")
-    if not userid:
-        return jsonify({"status": "error", "message": "Missing userid"}), 400
-    collection_name = get_today_collection()
-    collection = mongo_db[collection_name]
-    coords = list(collection.find({"userid": userid}, {'_id': 0}))
-    return jsonify(coords)
-
-@app.route('/sync_all', methods=['GET'])
-def sync_all():
-    userid = request.args.get("userid")
-    if not userid:
-        return jsonify({"status": "error", "message": "Missing userid"}), 400
-
-    try:
-        # Get all collections that look like dates
-        all_collections = mongo_db.list_collection_names()
-        date_docs = [c for c in all_collections if is_date_collection(c)]
-        date_docs.sort()
-
-        # Also include today's collection if not in history (and matches format)
-        today_str = get_today_collection()
-        if today_str not in date_docs and is_date_collection(today_str):
-            date_docs.append(today_str)
-
-        full_sync_data = []
-
-        for date_str in date_docs:
-            collection = mongo_db[date_str]
-            # CRITICAL FIX: Filter by userid to avoid leaking other users' data
-            cursor = collection.find({"userid": userid}, {"_id": 0})
-            full_sync_data.extend(list(cursor))
-
-        return jsonify({"status": "success", "synced_data": full_sync_data})
-
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/history', methods=['GET'])
-def history_dates():
-    userid = request.args.get("userid")
-    if not userid:
-        return jsonify({"status": "error", "message": "Missing userid"}), 400
-
-    # Only look at collections that match YYYY_MM_DD
-    all_collections = mongo_db.list_collection_names()
-    date_collections = [c for c in all_collections if is_date_collection(c)]
-    
-    user_dates = [
-        date_str for date_str in date_collections
-        if mongo_db[date_str].count_documents({"userid": userid}) > 0
-    ]
-    return jsonify({"available_dates": sorted(user_dates)})
-
-@app.route('/history/view', methods=['GET'])
-def view_history():
-    userid = request.args.get("userid")
-    date_str = request.args.get("date")
-    
-    if not userid:
-        return jsonify({"status": "error", "message": "Missing userid"}), 400
-    if not date_str:
-        return jsonify({"status": "error", "message": "Missing date"}), 400
-        
-    if not is_date_collection(date_str):
-         return jsonify({"status": "error", "message": "Invalid date format. Use YYYY_MM_DD"}), 400
-
-    collection = mongo_db[date_str]
-    # Check if collection exists implicitly by checking if it has data? 
-    # Or just query it. MongoDB is forgiving.
-    
-    coords = list(collection.find({"userid": userid}, {'_id': 0}))
-    return jsonify(coords)
 
 @app.route('/serverstatus', methods=['GET'])
 def get_server_status():
     return jsonify({"server": True})
 
 
+@app.route('/relay/status', methods=['GET'])
+def relay_status():
+    """Check if a child device is online"""
+    child_id = request.args.get("childId")
+    if not child_id:
+        return jsonify({"status": "error", "message": "Missing childId"}), 400
+    
+    online = child_id in connected_children
+    return jsonify({
+        "status": "success",
+        "childId": child_id,
+        "online": online
+    })
+
+
+# =============================================================================
+# WebSocket Events — Relay/Broker
+# =============================================================================
+
+@socketio.on('connect')
+def handle_connect():
+    print(f'[WS] Client connected: {request.sid}')
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    sid = request.sid
+    print(f'[WS] Client disconnected: {sid}')
+    
+    # If this was a child, remove from connected list
+    if sid in sid_to_child:
+        child_id = sid_to_child.pop(sid)
+        connected_children.pop(child_id, None)
+        leave_room(f'child_{child_id}')
+        print(f'[WS] Child {child_id} went offline')
+        
+        # Notify any subscribed parents that child went offline
+        socketio.emit('child_offline', {'childId': child_id}, room=f'watch_{child_id}')
+    
+    # If this was a parent with an active subscription, clean up
+    if sid in parent_subscriptions:
+        child_id = parent_subscriptions.pop(sid)
+        leave_room(f'watch_{child_id}')
+        print(f'[WS] Parent {sid} unsubscribed from child {child_id}')
+
+
+# --- Child Events ---
+
+@socketio.on('child_register')
+def handle_child_register(data):
+    """Child device registers itself as online.
+    
+    data: { "userId": "..." }
+    """
+    user_id = data.get('userId')
+    if not user_id:
+        emit('error', {'message': 'Missing userId'})
+        return
+    
+    sid = request.sid
+    connected_children[user_id] = sid
+    sid_to_child[sid] = user_id
+    join_room(f'child_{user_id}')
+    
+    print(f'[WS] Child registered: {user_id} (sid={sid})')
+    emit('registered', {'status': 'ok', 'userId': user_id})
+    
+    # Notify any parents already watching this child that it came online
+    socketio.emit('child_online', {'childId': user_id}, room=f'watch_{user_id}')
+
+
+@socketio.on('child_location_update')
+def handle_child_location_update(data):
+    """Child pushes its latest location. Server relays to subscribed parents.
+    
+    data: { "userId": "...", "x_cord": ..., "y_cord": ..., "logged_time": "..." }
+    """
+    user_id = data.get('userId')
+    if not user_id:
+        return
+    
+    # Relay to all parents watching this child (room: watch_{childId})
+    socketio.emit('live_location', {
+        'childId': user_id,
+        'x_cord': data.get('x_cord'),
+        'y_cord': data.get('y_cord'),
+        'logged_time': data.get('logged_time'),
+    }, room=f'watch_{user_id}', include_self=False)
+
+
+@socketio.on('child_history_response')
+def handle_child_history_response(data):
+    """Child responds to a history request from a parent.
+    
+    data: { "requestId": "...", "parentSid": "...", "coords": [...], "date": "..." }
+    """
+    parent_sid = data.get('parentSid')
+    if not parent_sid:
+        return
+    
+    # Send the history data directly to the requesting parent
+    socketio.emit('history_data', {
+        'requestId': data.get('requestId'),
+        'date': data.get('date'),
+        'coords': data.get('coords', []),
+    }, room=parent_sid)
+
+
+@socketio.on('child_dates_response')
+def handle_child_dates_response(data):
+    """Child responds with available dates for history.
+    
+    data: { "requestId": "...", "parentSid": "...", "dates": [...] }
+    """
+    parent_sid = data.get('parentSid')
+    if not parent_sid:
+        return
+    
+    socketio.emit('history_dates', {
+        'requestId': data.get('requestId'),
+        'dates': data.get('dates', []),
+    }, room=parent_sid)
+
+
+# --- Parent Events ---
+
+@socketio.on('parent_subscribe')
+def handle_parent_subscribe(data):
+    """Parent subscribes to a child's live location stream.
+    
+    data: { "childId": "..." }
+    """
+    child_id = data.get('childId')
+    if not child_id:
+        emit('error', {'message': 'Missing childId'})
+        return
+    
+    sid = request.sid
+    
+    # Unsubscribe from previous child if any
+    if sid in parent_subscriptions:
+        old_child = parent_subscriptions[sid]
+        leave_room(f'watch_{old_child}')
+    
+    parent_subscriptions[sid] = child_id
+    join_room(f'watch_{child_id}')
+    
+    online = child_id in connected_children
+    print(f'[WS] Parent {sid} subscribed to child {child_id} (online={online})')
+    
+    emit('subscribed', {
+        'childId': child_id,
+        'online': online,
+    })
+
+
+@socketio.on('parent_request_history')
+def handle_parent_request_history(data):
+    """Parent requests historical data for a specific date from a child.
+    
+    data: { "childId": "...", "date": "YYYY-MM-DD", "requestId": "..." }
+    """
+    child_id = data.get('childId')
+    date = data.get('date')
+    request_id = data.get('requestId', str(uuid.uuid4()))
+    
+    if not child_id or not date:
+        emit('error', {'message': 'Missing childId or date'})
+        return
+    
+    if child_id not in connected_children:
+        emit('history_data', {
+            'requestId': request_id,
+            'date': date,
+            'coords': [],
+            'error': 'child_offline',
+        })
+        return
+    
+    # Forward request to the child
+    child_sid = connected_children[child_id]
+    socketio.emit('history_request', {
+        'requestId': request_id,
+        'date': date,
+        'parentSid': request.sid,
+    }, room=child_sid)
+
+
+@socketio.on('parent_request_dates')
+def handle_parent_request_dates(data):
+    """Parent requests available history dates from a child.
+    
+    data: { "childId": "...", "requestId": "..." }
+    """
+    child_id = data.get('childId')
+    request_id = data.get('requestId', str(uuid.uuid4()))
+    
+    if not child_id:
+        emit('error', {'message': 'Missing childId'})
+        return
+    
+    if child_id not in connected_children:
+        emit('history_dates', {
+            'requestId': request_id,
+            'dates': [],
+            'error': 'child_offline',
+        })
+        return
+    
+    # Forward request to the child
+    child_sid = connected_children[child_id]
+    socketio.emit('dates_request', {
+        'requestId': request_id,
+        'parentSid': request.sid,
+    }, room=child_sid)
+
+
+@socketio.on('parent_unsubscribe')
+def handle_parent_unsubscribe(data):
+    """Parent unsubscribes from a child's live feed."""
+    sid = request.sid
+    if sid in parent_subscriptions:
+        child_id = parent_subscriptions.pop(sid)
+        leave_room(f'watch_{child_id}')
+        emit('unsubscribed', {'childId': child_id})
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    socketio.run(app, host='0.0.0.0', port=5000)

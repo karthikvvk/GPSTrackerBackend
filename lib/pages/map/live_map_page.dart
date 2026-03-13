@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:gpstracking/data/api_service.dart';
 import 'package:gpstracking/data/models.dart';
 import 'package:gpstracking/state/app_session.dart';
 import 'package:gpstracking/theme.dart';
@@ -9,7 +8,7 @@ import 'package:gpstracking/ui/app_widgets.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
-/// Live map page for Parent mode - view tracked locations
+/// Live map page for Parent mode - view tracked locations via relay
 class LiveMapPage extends StatefulWidget {
   const LiveMapPage({super.key});
 
@@ -19,39 +18,30 @@ class LiveMapPage extends StatefulWidget {
 
 class _LiveMapPageState extends State<LiveMapPage> {
   final MapController _mapController = MapController();
-  final ApiService _apiService = ApiService();
-
-  List<CoordinateLog> _coordinates = [];
+  final List<CoordinateLog> _coordinates = [];
   bool _loading = true;
   String? _error;
-  Timer? _refreshTimer;
+  StreamSubscription? _locationSub;
 
-  // Default center (can be updated based on user's location)
+  // Default center
   LatLng _center = const LatLng(13.0827, 80.2707); // Chennai, India
 
   @override
   void initState() {
     super.initState();
-    _loadCoordinates();
-
-    // Refresh every 10 seconds
-    _refreshTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => _loadCoordinates(),
-    );
+    _connectRelay();
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
-    _apiService.dispose();
+    _locationSub?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadCoordinates() async {
+  void _connectRelay() {
     final session = context.read<AppSession>();
 
-    // For Parent mode, use selected child's ID; otherwise use own ID
+    // For Parent mode, use selected child's ID
     String? targetId;
     if (session.isParent && session.selectedChildId != null) {
       targetId = session.selectedChildId;
@@ -67,29 +57,27 @@ class _LiveMapPageState extends State<LiveMapPage> {
       return;
     }
 
-    try {
-      final coords = await _apiService.viewToday(targetId);
-      if (mounted) {
-        setState(() {
-          _coordinates = coords;
-          _loading = false;
-          _error = null;
+    // Connect as parent and subscribe to child's live feed
+    session.connectAsParent(targetId);
 
-          // Center map on latest coordinate
-          if (coords.isNotEmpty) {
-            final latest = coords.last;
-            _center = LatLng(latest.xCord, latest.yCord);
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = 'Failed to load coordinates';
-        });
-      }
+    // Listen for live locations from the relay
+    final relay = session.relayService;
+    if (relay != null) {
+      _locationSub = relay.liveLocationStream.listen((coord) {
+        if (mounted) {
+          setState(() {
+            _coordinates.add(coord);
+            _loading = false;
+            _error = null;
+            _center = LatLng(coord.xCord, coord.yCord);
+          });
+        }
+      });
     }
+
+    setState(() {
+      _loading = false;
+    });
   }
 
   @override
@@ -111,6 +99,26 @@ class _LiveMapPageState extends State<LiveMapPage> {
                     style: context.textStyles.headlineMedium
                         ?.copyWith(color: scheme.onSurface),
                   ),
+                  const SizedBox(width: AppSpacing.sm),
+                  // Child online indicator
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color:
+                          session.childOnline ? Colors.green : scheme.outline,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    session.childOnline ? 'Online' : 'Offline',
+                    style: context.textStyles.labelSmall?.copyWith(
+                      color: session.childOnline
+                          ? Colors.green
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
                   const Spacer(),
                   if (session.isParent && session.linkedChildren.isNotEmpty)
                     _ChildSelector(
@@ -118,12 +126,21 @@ class _LiveMapPageState extends State<LiveMapPage> {
                       selectedId: session.selectedChildId,
                       onChanged: (id) {
                         session.selectChild(id);
-                        _loadCoordinates();
+                        _coordinates.clear();
+                        if (id != null) {
+                          session.connectAsParent(id);
+                        }
                       },
                     ),
                   IconButton(
                     icon: Icon(Icons.refresh_rounded, color: scheme.primary),
-                    onPressed: _loadCoordinates,
+                    onPressed: () {
+                      setState(() {
+                        _coordinates.clear();
+                        _loading = true;
+                      });
+                      _connectRelay();
+                    },
                   ),
                 ],
               ),
@@ -156,8 +173,10 @@ class _LiveMapPageState extends State<LiveMapPage> {
                   Expanded(
                     child: Text(
                       _coordinates.isNotEmpty
-                          ? '${_coordinates.length} points today • Last: ${_coordinates.last.loggedTime.split('T').last.split('.').first}'
-                          : 'No location data today',
+                          ? '${_coordinates.length} points • Last: ${_coordinates.last.loggedTime.split('T').last.split('.').first}'
+                          : session.childOnline
+                              ? 'Waiting for location data...'
+                              : 'Child device is offline',
                       style: context.textStyles.bodyMedium
                           ?.copyWith(color: scheme.onSurfaceVariant),
                     ),
@@ -188,7 +207,7 @@ class _LiveMapPageState extends State<LiveMapPage> {
           SubtleOutlineButton(
             label: 'Retry',
             icon: Icons.refresh_rounded,
-            onPressed: _loadCoordinates,
+            onPressed: _connectRelay,
           ),
         ],
       ),
@@ -225,7 +244,6 @@ class _LiveMapPageState extends State<LiveMapPage> {
         // Markers
         MarkerLayer(
           markers: [
-            // All points as small dots
             ...points.asMap().entries.map((entry) {
               final isLast = entry.key == points.length - 1;
               return Marker(

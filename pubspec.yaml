@@ -35,6 +35,9 @@ dependencies:
   # HTTP
   http: ^1.4.0
 
+  # WebSocket Relay
+  socket_io_client: ^3.0.2
+
   # Map Display
   flutter_map: ^8.0.0
   latlong2: ^0.9.1
