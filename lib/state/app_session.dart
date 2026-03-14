@@ -49,6 +49,7 @@ class AppSession extends ChangeNotifier {
   RelayService? _relayService;
   StreamSubscription? _liveLocationSub;
   StreamSubscription? _childStatusSub;
+  StreamSubscription? _syncBatchSub;
   final List<String> _trackingLogs = [];
 
   bool get trackingActive => _trackingActive;
@@ -330,12 +331,11 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Connect relay as parent and subscribe to a child's live stream.
+  /// Connect relay as parent, subscribe to live stream, and trigger DB sync.
   Future<void> connectAsParent(String childId) async {
     if (_userId == null) return;
 
-    // FIX: idempotency guard — don't reconnect if already watching this child.
-    // Without this, every rebuild floods the server with connect/subscribe cycles.
+    // Idempotency guard — don't reconnect if already watching this child.
     if (_selectedChildId == childId && (_relayService?.isConnected ?? false)) {
       return;
     }
@@ -343,6 +343,7 @@ class AppSession extends ChangeNotifier {
     // Tear down any existing relay cleanly.
     _liveLocationSub?.cancel();
     _childStatusSub?.cancel();
+    _syncBatchSub?.cancel();
     _relayService?.disconnect();
     _relayService = RelayService();
 
@@ -352,22 +353,47 @@ class AppSession extends ChangeNotifier {
 
     await _relayService!.connect(userId: _userId!, isChild: false);
 
-    // Listen for live locations and persist each one to local SQLite.
-    // This populates the History calendar on the parent device.
+    // Listen for live locations and persist to local SQLite (history calendar).
     _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
       _lastLocation = coord;
       notifyListeners();
-      // Fire-and-forget — save to local DB so history calendar shows data
       LocalDb.insertLog(coord).catchError((e) {
         if (kDebugMode) print('[AppSession] Failed to save relayed coord: $e');
       });
     });
 
-    // Listen for child online/offline status
+    // Listen for child online/offline status.
     _childStatusSub = _relayService!.childStatusStream.listen((online) {
       _childOnline = online;
       notifyListeners();
     });
+
+    // Listen for sync batches and persist each record to local SQLite.
+    _syncBatchSub = _relayService!.syncBatchStream.listen((coords) {
+      for (final raw in coords) {
+        try {
+          final coord = CoordinateLog(
+            xCord: (raw['x_cord'] as num).toDouble(),
+            yCord: (raw['y_cord'] as num).toDouble(),
+            loggedTime: raw['logged_time'] as String,
+            userId: childId,
+            synced: true,
+          );
+          LocalDb.insertLog(coord).catchError((e) {
+            if (kDebugMode) print('[AppSession] Sync insert error: $e');
+          });
+        } catch (e) {
+          if (kDebugMode) print('[AppSession] Sync parse error: $e');
+        }
+      }
+      if (kDebugMode) print('[AppSession] Synced ${coords.length} records');
+    });
+
+    // Always request full history — child sends everything, ConflictAlgorithm.replace
+    // handles duplicates already in the parent DB. This avoids the case where the
+    // parent's last live-relay timestamp skips pre-connection historical records.
+    _relayService!.requestSync(childId);
+    if (kDebugMode) print('[AppSession] Full sync requested (fromTimestamp=null)');
   }
 
 
@@ -431,7 +457,7 @@ class AppSession extends ChangeNotifier {
     final trimmed = childName.trim();
     _linkedChildName = trimmed.isEmpty ? null : trimmed;
 
-    // Also register as a proper LinkedChild so data-fetching works
+    // Register as a full LinkedChild so data-fetching works.
     final alreadyLinked = _linkedChildren.any((c) => c.odemoId == childUserId);
     if (!alreadyLinked && trimmed.isNotEmpty) {
       _linkedChildren.add(LinkedChild(
@@ -442,6 +468,31 @@ class AppSession extends ChangeNotifier {
     }
     _selectedChildId = childUserId;
     notifyListeners();
+
+    // After linking, establish the relay connection and kick off a full sync
+    // so the History calendar starts populating immediately.
+    connectAsParent(childUserId);
+  }
+
+  /// Request an incremental DB sync for the currently selected child.
+  ///
+  /// Safe to call from any page (History calendar, Live Map, etc.).
+  /// No-ops if no child is selected or relay is not connected as parent.
+  Future<void> triggerSync() async {
+    final childId = _selectedChildId;
+    if (childId == null || _relayService == null) return;
+
+    // If relay isn't connected yet, establish the connection first
+    // (which will also trigger a sync automatically).
+    if (!_relayService!.isConnected) {
+      await connectAsParent(childId);
+      return;
+    }
+
+    // Relay already connected — just request the incremental sync.
+    final lastTs = await LocalDb.getLastTimestamp(childId);
+    _relayService!.requestSync(childId, fromTimestamp: lastTs);
+    if (kDebugMode) print('[AppSession] triggerSync from=$lastTs');
   }
 
   /// Removes the linked child account.

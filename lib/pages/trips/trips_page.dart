@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/nav.dart';
+import 'package:gpstracking/state/app_session.dart';
 import 'package:gpstracking/theme.dart';
+import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 class TripsPage extends StatefulWidget {
@@ -22,6 +24,17 @@ class _TripsPageState extends State<TripsPage> {
   void initState() {
     super.initState();
     _loadTripDates();
+    // Trigger an incremental DB sync so the calendar shows data
+    // fresh from the child every time the History tab is opened.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final session = context.read<AppSession>();
+      if (session.isParent) {
+        await session.triggerSync();
+        // Reload dates after sync has had a moment to start writing records.
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) _loadTripDates();
+      }
+    });
   }
 
   Future<void> _loadTripDates() async {

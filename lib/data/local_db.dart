@@ -180,6 +180,56 @@ class LocalDb {
         .toList();
   }
 
+  /// Get the latest logged_time stored for a given user_id.
+  /// Returns null if no records exist for that user.
+  /// Used by the parent to determine where incremental sync should start.
+  static Future<String?> getLastTimestamp(String userId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT MAX(logged_time) as last_time FROM $_logsTable WHERE user_id = ?',
+      [userId],
+    );
+    final value = result.first['last_time'];
+    return value as String?;
+  }
+
+  /// Get all logs where logged_time > [fromTimestamp].
+  /// If [cutoffTimestamp] is provided, also applies logged_time < [cutoffTimestamp].
+  /// Pass an empty string for [fromTimestamp] to ignore the lower bound.
+  static Future<List<CoordinateLog>> getLogsAfter(
+    String fromTimestamp, [
+    String? cutoffTimestamp,
+  ]) async {
+    final db = await database;
+    List<Map<String, dynamic>> results;
+
+    if (fromTimestamp.isEmpty && cutoffTimestamp == null) {
+      results = await db.query(_logsTable, orderBy: 'logged_time ASC');
+    } else if (fromTimestamp.isEmpty) {
+      results = await db.query(
+        _logsTable,
+        where: 'logged_time < ?',
+        whereArgs: [cutoffTimestamp],
+        orderBy: 'logged_time ASC',
+      );
+    } else if (cutoffTimestamp == null) {
+      results = await db.query(
+        _logsTable,
+        where: 'logged_time > ?',
+        whereArgs: [fromTimestamp],
+        orderBy: 'logged_time ASC',
+      );
+    } else {
+      results = await db.query(
+        _logsTable,
+        where: 'logged_time > ? AND logged_time < ?',
+        whereArgs: [fromTimestamp, cutoffTimestamp],
+        orderBy: 'logged_time ASC',
+      );
+    }
+    return results.map((row) => CoordinateLog.fromDb(row)).toList();
+  }
+
   /// Get all logs
   static Future<List<CoordinateLog>> getAllLogs() async {
     final db = await database;

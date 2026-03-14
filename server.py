@@ -433,6 +433,55 @@ def handle_parent_request_dates(data):
     }, room=child_sid)
 
 
+@socketio.on('parent_request_sync')
+def handle_parent_request_sync(data):
+    """Parent requests a historical DB sync from the child.
+
+    data: { "childId": "...", "fromTimestamp": "2024-01-01T00:00:00Z" | null }
+    The server forwards the request to the child, which will stream back
+    its local SQLite data in batches via child_sync_batch.
+    """
+    child_id = data.get('childId')
+    from_timestamp = data.get('fromTimestamp')  # ISO string or None
+
+    if not child_id:
+        emit('error', {'message': 'Missing childId'})
+        return
+
+    if child_id not in connected_children:
+        emit('sync_batch', {'coords': [], 'done': True, 'error': 'child_offline'})
+        return
+
+    child_sid = connected_children[child_id]
+    print(f'[WS] Parent {request.sid} requested sync from child {child_id} (from={from_timestamp})')
+
+    socketio.emit('sync_request', {
+        'parentSid': request.sid,
+        'fromTimestamp': from_timestamp,
+    }, room=child_sid)
+
+
+@socketio.on('child_sync_batch')
+def handle_child_sync_batch(data):
+    """Child sends a batch of historical coordinate records to a specific parent.
+
+    data: { "parentSid": "...", "coords": [...], "done": bool }
+    The server relays directly to the parent's socket by sid.
+    """
+    parent_sid = data.get('parentSid')
+    if not parent_sid:
+        return
+
+    coords = data.get('coords', [])
+    done = data.get('done', False)
+    print(f'[WS] Sync batch → parent {parent_sid}: {len(coords)} records, done={done}')
+
+    socketio.emit('sync_batch', {
+        'coords': coords,
+        'done': done,
+    }, room=parent_sid)
+
+
 @socketio.on('parent_unsubscribe')
 def handle_parent_unsubscribe(data):
     """Parent unsubscribes from a child's live feed."""

@@ -16,7 +16,9 @@ class RelayService {
   String? _userId;
   bool _isChild = false;
   bool _connected = false;
-  String? _pendingChildId; // child to subscribe after connect (parent mode)
+  String? _pendingChildId;        // child to subscribe after connect (parent mode)
+  String? _pendingSyncChildId;    // child to sync after connect (parent mode)
+  String? _pendingSyncFromTimestamp; // incremental sync start point
 
   // --- Streams for consumers ---
 
@@ -39,6 +41,12 @@ class RelayService {
   final _historyDatesController = StreamController<List<String>>.broadcast();
   Stream<List<String>> get historyDatesStream =>
       _historyDatesController.stream;
+
+  /// Sync batch responses (parent receives batches of historical coords)
+  final _syncBatchController =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
+  Stream<List<Map<String, dynamic>>> get syncBatchStream =>
+      _syncBatchController.stream;
 
   bool get isConnected => _connected;
 
@@ -76,6 +84,16 @@ class RelayService {
         // Subscribe now that the socket is actually open
         _socket!.emit('parent_subscribe', {'childId': _pendingChildId});
         if (kDebugMode) print('[RelayService] Subscribed to child: $_pendingChildId');
+        // Fire pending DB sync request if queued
+        if (_pendingSyncChildId != null) {
+          _socket!.emit('parent_request_sync', {
+            'childId': _pendingSyncChildId,
+            'fromTimestamp': _pendingSyncFromTimestamp,
+          });
+          if (kDebugMode) print('[RelayService] Sync emitted (deferred) from=$_pendingSyncFromTimestamp');
+          _pendingSyncChildId = null;
+          _pendingSyncFromTimestamp = null;
+        }
       }
     });
 
@@ -162,6 +180,56 @@ class RelayService {
         'dates': dates,
       });
     });
+
+    // Parent requests a DB sync: stream all records after fromTimestamp
+    _socket?.on('sync_request', (data) async {
+      final parentSid = data['parentSid'] as String;
+      final fromTimestamp = (data['fromTimestamp'] as String?) ?? '';
+
+      if (kDebugMode) {
+        // Diagnostic: show total records and actual timestamp range in DB
+        final allLogs = await LocalDb.getAllLogs();
+        print('[Sync] DB total records: ${allLogs.length}');
+        if (allLogs.isNotEmpty) {
+          print('[Sync] DB earliest: ${allLogs.first.loggedTime}');
+          print('[Sync] DB latest:   ${allLogs.last.loggedTime}');
+        }
+        print('[Sync] Query from=$fromTimestamp (no cutoff)');
+      }
+
+      final logs = await LocalDb.getLogsAfter(fromTimestamp);
+
+      if (kDebugMode) {
+        print('[Sync] getLogsAfter returned: ${logs.length} records');
+      }
+
+      if (logs.isEmpty) {
+        _socket?.emit('child_sync_batch',
+            {'parentSid': parentSid, 'coords': [], 'done': true});
+        return;
+      }
+
+      const batchSize = 200;
+      for (var i = 0; i < logs.length; i += batchSize) {
+        final end =
+            (i + batchSize < logs.length) ? i + batchSize : logs.length;
+        final batch = logs.sublist(i, end);
+        final done = end == logs.length;
+
+        _socket?.emit('child_sync_batch', {
+          'parentSid': parentSid,
+          'coords': batch.map((l) => l.toJson()).toList(),
+          'done': done,
+        });
+
+        // Small yield between batches to avoid saturating the event loop
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+
+      if (kDebugMode) {
+        print('[RelayService] Sync complete: ${logs.length} records sent');
+      }
+    });
   }
 
   /// Push a location update to the server for relay to subscribed parents.
@@ -221,6 +289,17 @@ class RelayService {
       final dates = (data['dates'] as List).cast<String>();
       _historyDatesController.add(dates);
     });
+
+    // Historical sync batch from child (streaming DB data)
+    _socket?.on('sync_batch', (data) {
+      final rawCoords = data['coords'] as List? ?? [];
+      final coords = rawCoords.cast<Map<String, dynamic>>();
+      _syncBatchController.add(coords);
+      if (kDebugMode) {
+        final done = data['done'] as bool? ?? false;
+        print('[RelayService] sync_batch received: ${coords.length} records, done=$done');
+      }
+    });
   }
 
   /// Subscribe to a child's live location stream.
@@ -257,6 +336,29 @@ class RelayService {
     });
   }
 
+  /// Request an incremental DB sync from the child.
+  ///
+  /// The child will stream all records with logged_time > [fromTimestamp]
+  /// up to (now - 1 minute) back to this parent in batches.
+  /// Pass null for [fromTimestamp] to request the full history.
+  /// If the socket is not yet connected, the request is queued and fires
+  /// from onConnect — no data is lost.
+  void requestSync(String childId, {String? fromTimestamp}) {
+    if (kDebugMode) print('[RelayService] requestSync connected=$_connected from=$fromTimestamp');
+    if (!_connected || _socket == null) {
+      // Queue it — onConnect will fire it once the socket opens
+      _pendingSyncChildId = childId;
+      _pendingSyncFromTimestamp = fromTimestamp;
+      if (kDebugMode) print('[RelayService] Sync queued (not yet connected)');
+      return;
+    }
+    _socket!.emit('parent_request_sync', {
+      'childId': childId,
+      'fromTimestamp': fromTimestamp,
+    });
+    if (kDebugMode) print('[RelayService] Sync emitted immediately from=$fromTimestamp');
+  }
+
   // =========================================================================
   // Cleanup
   // =========================================================================
@@ -267,5 +369,6 @@ class RelayService {
     _childStatusController.close();
     _historyDataController.close();
     _historyDatesController.close();
+    _syncBatchController.close();
   }
 }

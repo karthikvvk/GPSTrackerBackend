@@ -96,7 +96,6 @@ class _LiveMapPageState extends State<LiveMapPage> {
                 children: [
                   Flexible(
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           'Live Map',
@@ -124,6 +123,7 @@ class _LiveMapPageState extends State<LiveMapPage> {
                                 ? Colors.green
                                 : scheme.onSurfaceVariant,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
