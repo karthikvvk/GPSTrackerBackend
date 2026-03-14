@@ -52,6 +52,10 @@ class AppSession extends ChangeNotifier {
   StreamSubscription? _syncBatchSub;
   final List<String> _trackingLogs = [];
 
+  // Fires when an entire sync run completes (done=true received).
+  final _syncCompletedController = StreamController<void>.broadcast();
+  Stream<void> get syncCompleted => _syncCompletedController.stream;
+
   bool get trackingActive => _trackingActive;
   CoordinateLog? get lastLocation => _lastLocation;
   bool get childOnline => _childOnline;
@@ -368,32 +372,40 @@ class AppSession extends ChangeNotifier {
       notifyListeners();
     });
 
-    // Listen for sync batches and persist each record to local SQLite.
-    _syncBatchSub = _relayService!.syncBatchStream.listen((coords) {
-      for (final raw in coords) {
+    // Collect sync batch records and flush them all in one DB transaction.
+    // This avoids the DB lock contention from individual insertLog calls
+    // competing with the background service's continuous location writes.
+    _syncBatchSub = _relayService!.syncBatchStream.listen((batch) async {
+      final rawCoords = batch.coords;
+      final done = batch.done;
+
+      final coords = <CoordinateLog>[];
+      for (final raw in rawCoords) {
         try {
-          final coord = CoordinateLog(
+          coords.add(CoordinateLog(
             xCord: (raw['x_cord'] as num).toDouble(),
             yCord: (raw['y_cord'] as num).toDouble(),
             loggedTime: raw['logged_time'] as String,
             userId: childId,
             synced: true,
-          );
-          LocalDb.insertLog(coord).catchError((e) {
-            if (kDebugMode) print('[AppSession] Sync insert error: $e');
-          });
+          ));
         } catch (e) {
           if (kDebugMode) print('[AppSession] Sync parse error: $e');
         }
       }
-      if (kDebugMode) print('[AppSession] Synced ${coords.length} records');
+      if (coords.isNotEmpty) {
+        await LocalDb.insertLogsBatch(coords).catchError((e) {
+          if (kDebugMode) print('[AppSession] Sync batch insert error: $e');
+        });
+        if (kDebugMode) print('[AppSession] Batch inserted ${coords.length} records');
+      }
+      if (done) {
+        _syncCompletedController.add(null);
+        if (kDebugMode) print('[AppSession] Sync complete — notified listeners');
+      }
     });
-
-    // Always request full history — child sends everything, ConflictAlgorithm.replace
-    // handles duplicates already in the parent DB. This avoids the case where the
-    // parent's last live-relay timestamp skips pre-connection historical records.
-    _relayService!.requestSync(childId);
-    if (kDebugMode) print('[AppSession] Full sync requested (fromTimestamp=null)');
+    // NOTE: auto-sync is NOT triggered here intentionally.
+    // Sync is triggered explicitly by History/TripDetails page visits via triggerSync().
   }
 
 

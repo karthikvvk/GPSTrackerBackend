@@ -1,7 +1,4 @@
 {
     "backend_url": "http://localhost:5000",
-    "_mongo_uri_atlas": "mongodb+srv://<username>:<password>@<cluster-name>.mongodb.net/?appName=<app-name>",
-    "mongo_uri": "mongodb://localhost:27017/",
-    "db_name": "GPSTracker",
     "debug_mode": true
 }

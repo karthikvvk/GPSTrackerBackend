@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:gpstracking/state/app_session.dart';
 import 'package:gpstracking/theme.dart';
 import 'package:gpstracking/ui/app_widgets.dart';
 import 'package:gpstracking/data/local_db.dart';
+import 'package:provider/provider.dart';
 
 class TripDetailsPage extends StatefulWidget {
   const TripDetailsPage({super.key, required this.tripId});
@@ -28,6 +30,17 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   void initState() {
     super.initState();
     _loadGpsData();
+    // Trigger DB sync when the history detail page is opened (parent mode only).
+    // After sync completes, reload the GPS data so the map shows fresh records.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final session = context.read<AppSession>();
+      if (session.isParent) {
+        session.triggerSync();
+        session.syncCompleted.first.then((_) {
+          if (mounted) _loadGpsData();
+        });
+      }
+    });
   }
 
   @override

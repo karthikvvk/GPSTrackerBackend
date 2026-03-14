@@ -137,6 +137,29 @@ class LocalDb {
     );
   }
 
+  /// Insert multiple logs in a single transaction.
+  ///
+  /// Use this for bulk inserts (e.g. DB sync batches) instead of calling
+  /// [insertLog] in a loop — one transaction vs N transactions eliminates
+  /// the lock contention with the background service's continuous writes.
+  static Future<void> insertLogsBatch(List<CoordinateLog> logs) async {
+    if (logs.isEmpty) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final log in logs) {
+        final simDate = log.loggedTime.split('T').first;
+        await txn.insert(
+          _logsTable,
+          {
+            ...log.toDb(),
+            'sim_date': simDate,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
   /// Get all logs for a specific date
   static Future<List<CoordinateLog>> getLogsByDate(String date) async {
     final db = await database;

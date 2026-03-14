@@ -42,10 +42,10 @@ class RelayService {
   Stream<List<String>> get historyDatesStream =>
       _historyDatesController.stream;
 
-  /// Sync batch responses (parent receives batches of historical coords)
+  /// Sync batch responses (parent receives batches of historical coords + done flag)
   final _syncBatchController =
-      StreamController<List<Map<String, dynamic>>>.broadcast();
-  Stream<List<Map<String, dynamic>>> get syncBatchStream =>
+      StreamController<({List<Map<String, dynamic>> coords, bool done})>.broadcast();
+  Stream<({List<Map<String, dynamic>> coords, bool done})> get syncBatchStream =>
       _syncBatchController.stream;
 
   bool get isConnected => _connected;
@@ -294,9 +294,9 @@ class RelayService {
     _socket?.on('sync_batch', (data) {
       final rawCoords = data['coords'] as List? ?? [];
       final coords = rawCoords.cast<Map<String, dynamic>>();
-      _syncBatchController.add(coords);
+      final done = data['done'] as bool? ?? false;
+      _syncBatchController.add((coords: coords, done: done));
       if (kDebugMode) {
-        final done = data['done'] as bool? ?? false;
         print('[RelayService] sync_batch received: ${coords.length} records, done=$done');
       }
     });
