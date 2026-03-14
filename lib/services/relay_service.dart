@@ -72,6 +72,13 @@ class RelayService {
       'transports': ['websocket'],
       'autoConnect': false,
       'forceNew': true,
+      // Render free-tier can take 30-60s on cold start — give it plenty of time.
+      'connectTimeout': 60000,      // 60 s to establish the connection
+      'timeout': 60000,             // 60 s general response timeout
+      'reconnection': true,
+      'reconnectionAttempts': 10,   // try up to 10 times before giving up
+      'reconnectionDelay': 2000,    // start at 2 s between retries
+      'reconnectionDelayMax': 10000,// cap at 10 s
     });
 
     _socket!.onConnect((_) {

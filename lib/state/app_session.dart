@@ -489,22 +489,25 @@ class AppSession extends ChangeNotifier {
   /// Request an incremental DB sync for the currently selected child.
   ///
   /// Safe to call from any page (History calendar, Live Map, etc.).
-  /// No-ops if no child is selected or relay is not connected as parent.
+  /// Automatically connects the relay if it isn't already up.
   Future<void> triggerSync() async {
     final childId = _selectedChildId;
-    if (childId == null || _relayService == null) return;
-
-    // If relay isn't connected yet, establish the connection first
-    // (which will also trigger a sync automatically).
-    if (!_relayService!.isConnected) {
-      await connectAsParent(childId);
+    if (childId == null) {
+      if (kDebugMode) print('[AppSession] triggerSync: no child selected — skipped');
       return;
     }
 
-    // Relay already connected — just request the incremental sync.
-    final lastTs = await LocalDb.getLastTimestamp(childId);
-    _relayService!.requestSync(childId, fromTimestamp: lastTs);
-    if (kDebugMode) print('[AppSession] triggerSync from=$lastTs');
+    // Ensure relay exists and is connected as parent.
+    // connectAsParent is idempotent — safe to call even if already connected.
+    if (_relayService == null || !_relayService!.isConnected) {
+      if (kDebugMode) print('[AppSession] triggerSync: relay not ready — connecting first');
+      await connectAsParent(childId);
+      // requestSync uses _pendingSyncChildId to queue if socket isn't open yet.
+    }
+
+    // Request full history sync (requestSync queues if still connecting).
+    _relayService?.requestSync(childId);
+    if (kDebugMode) print('[AppSession] triggerSync: sync requested for $childId');
   }
 
   /// Removes the linked child account.
