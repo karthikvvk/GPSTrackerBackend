@@ -44,7 +44,8 @@ class Settings {
 
   // For physical device testing, use the computer's LAN IP.
   // Emulator would use 'http://10.0.2.2:5000'.
-  String get backendUrl => _settings?['backend_url'] ?? 'http://192.168.0.101:5000';
+  String get backendUrl =>
+      _settings?['backend_url'] ?? 'https://gpstrackerbackend-1.onrender.com';
   String get mongoUri => _settings?['mongo_uri'] ?? '';
   String get dbName => _settings?['db_name'] ?? 'GPSTracker';
   bool get debugMode => _settings?['debug_mode'] ?? false;
