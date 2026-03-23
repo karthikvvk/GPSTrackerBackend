@@ -6,6 +6,7 @@ A real-time GPS tracking application with a **Flutter** mobile client and a **Fl
 
 ---
 
+
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
