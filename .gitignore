@@ -28,7 +28,8 @@ firebase.json
 .zip
 .apk
 .txt
-
+users.db
+logger.py
 
 # Flutter/Dart/Pub related
 **/doc/api/

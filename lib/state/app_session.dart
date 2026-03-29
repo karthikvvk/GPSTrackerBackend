@@ -486,6 +486,25 @@ class AppSession extends ChangeNotifier {
     connectAsParent(childUserId);
   }
 
+  /// Look up a child account by email via the backend, then link it.
+  /// Used by the parent's Email Method on the Link Account page.
+  /// Returns an error message string on failure, or null on success.
+  Future<String?> lookupChildByEmail(String email) async {
+    try {
+      final user = await _authService.lookupByEmail(email.trim().toLowerCase());
+      if (user == null) return 'No user found with that email.';
+      final childUserId = user['user_id'] as String;
+      final childName   = (user['display_name'] as String?)?.isNotEmpty == true
+          ? user['display_name'] as String
+          : user['email'] as String? ?? email;
+      linkChild(childName: childName, childUserId: childUserId);
+      return null; // success
+    } catch (e) {
+      if (kDebugMode) print('[AppSession] lookupChildByEmail error: $e');
+      return e.toString().replaceAll('Exception: ', '');
+    }
+  }
+
   /// Request an incremental DB sync for the currently selected child.
   ///
   /// Safe to call from any page (History calendar, Live Map, etc.).

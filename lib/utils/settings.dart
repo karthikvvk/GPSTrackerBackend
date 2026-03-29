@@ -1,7 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/services.dart';
 
-/// Centralized settings loader for the application
+/// Centralized settings loader — reads settings.json bundled as a Flutter asset.
+/// This works correctly on both emulator and physical device.
 class Settings {
   static Settings? _instance;
   static Map<String, dynamic>? _settings;
@@ -18,34 +19,21 @@ class Settings {
 
   Future<void> _loadSettings() async {
     try {
-      // Try to find settings.json relative to the executable
-      final exeDir = File(Platform.resolvedExecutable).parent.path;
-      final possiblePaths = [
-        'settings.json',
-        '$exeDir/settings.json',
-        '$exeDir/../settings.json',
-        '$exeDir/data/settings.json',
-      ];
-
-      for (final path in possiblePaths) {
-        final file = File(path);
-        if (await file.exists()) {
-          final content = await file.readAsString();
-          _settings = json.decode(content);
-          return;
-        }
-      }
-      // Fallback to defaults
-      _settings = {};
+      final content = await rootBundle.loadString('settings.json');
+      _settings = json.decode(content) as Map<String, dynamic>;
     } catch (e) {
+      // settings.json not found or malformed — use defaults
       _settings = {};
     }
+    print('searching_json');
+    print(_settings);
   }
 
-  // For physical device testing, use the computer's LAN IP.
-  // Emulator would use 'http://10.0.2.2:5000'.
-  String get backendUrl =>
-      _settings?['backend_url'] ?? 'http://localhost:5000/';
+  // Update settings.json with your backend URL:
+  //   Physical device on same WiFi → "http://192.168.0.101:5000"
+  //   Emulator                     → "http://10.0.2.2:5000"
+  //   Production (Render)          → "https://gpstrackerbackend-1.onrender.com"
+  String get backendUrl => _settings?['backend_url'] ?? 'http://localhost:5000';
   String get mongoUri => _settings?['mongo_uri'] ?? '';
   String get dbName => _settings?['db_name'] ?? 'GPSTracker';
   bool get debugMode => _settings?['debug_mode'] ?? false;

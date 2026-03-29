@@ -1,9 +1,6 @@
 Flask
-flask-pymongo
-pymongo
 flask-cors
 python-dotenv
-dnspython
 gunicorn
 bcrypt
 flask-socketio

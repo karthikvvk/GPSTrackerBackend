@@ -8,6 +8,9 @@ import sqlite3
 import bcrypt
 import uuid
 import threading
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # ---------------------------------------------------------------------------
 # Settings
@@ -53,6 +56,40 @@ def init_db():
 init_db()
 
 # ---------------------------------------------------------------------------
+# Email (Supabase SMTP relay)
+# ---------------------------------------------------------------------------
+_SMTP_HOST = os.environ.get('SUPABASE_SMTP_HOST')
+_SMTP_PORT = int(os.environ.get('SUPABASE_SMTP_PORT', '465'))
+_SMTP_USER = os.environ.get('SUPABASE_SMTP_USER')
+_SMTP_PASS = os.environ.get('SUPABASE_SMTP_PASS')
+_FROM_EMAIL = os.environ.get('SUPABASE_FROM_EMAIL')
+
+
+def _send_email_sync(to: str, subject: str, html_body: str):
+    """Send a transactional email via Supabase SMTP relay (blocking)."""
+    if not all([_SMTP_HOST, _SMTP_USER, _SMTP_PASS, _FROM_EMAIL]):
+        print('[Email] SMTP not configured — skipping email.')
+        return
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = _FROM_EMAIL
+        msg['To'] = to
+        msg.attach(MIMEText(html_body, 'html'))
+        with smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT) as server:
+            server.login(_SMTP_USER, _SMTP_PASS)
+            server.send_message(msg)
+        print(f'[Email] Sent "{subject}" → {to}')
+    except Exception as e:
+        print(f'[Email] Failed to send email: {e}')
+
+
+def send_email(to: str, subject: str, html_body: str):
+    """Fire-and-forget email sending — runs in a background thread."""
+    threading.Thread(target=_send_email_sync, args=(to, subject, html_body), daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
 # Flask + SocketIO
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
@@ -85,6 +122,7 @@ def register():
     email = data["email"].strip().lower()
     password = data["password"]
     display_name = data.get("display_name", email.split("@")[0])
+    print(email, password, display_name)
 
     if "@" not in email or "." not in email:
         return jsonify({"status": "error", "message": "Invalid email format"}), 400
@@ -108,6 +146,19 @@ def register():
             conn.close()
     except sqlite3.IntegrityError:
         return jsonify({"status": "error", "message": "Email already registered"}), 409
+
+    # Send welcome email (non-blocking)
+    welcome_html = f'''<html><body style="font-family:sans-serif;background:#f4f4f4;padding:32px">
+    <div style="max-width:480px;margin:auto;background:#fff;border-radius:12px;padding:32px">
+      <h2 style="color:#6366f1">Welcome to GPS Tracker!</h2>
+      <p>Hi <strong>{display_name}</strong>,</p>
+      <p>Your account has been created successfully.</p>
+      <p style="color:#666;font-size:14px">Email: {email}</p>
+      <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+      <p style="color:#999;font-size:12px">If you didn't create this account, please ignore this email.</p>
+    </div>
+    </body></html>'''
+    send_email(email, 'Welcome to GPS Tracker!', welcome_html)
 
     return jsonify({
         "status": "success",
@@ -149,6 +200,35 @@ def login():
             "email": row["email"],
             "display_name": row["display_name"],
             "role": row["role"]
+        }
+    })
+
+
+@app.route('/auth/lookup', methods=['GET'])
+def lookup_user():
+    """Look up a user's public info by email address.
+    Used by parents to link a child account via email.
+    """
+    email = request.args.get('email', '').strip().lower()
+    if not email:
+        return jsonify({"status": "error", "message": "Missing email"}), 400
+
+    with _db_lock:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT user_id, display_name, email FROM users WHERE email = ?', (email,)
+        ).fetchone()
+        conn.close()
+
+    if not row:
+        return jsonify({"status": "error", "message": "No user found with that email"}), 404
+
+    return jsonify({
+        "status": "success",
+        "user": {
+            "user_id": row["user_id"],
+            "display_name": row["display_name"],
+            "email": row["email"]
         }
     })
 

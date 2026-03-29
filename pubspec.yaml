@@ -16,11 +16,7 @@ dependencies:
   provider: ^6.1.2
   table_calendar: ^3.0.9
 
-  # Firebase
-  firebase_core: ^3.6.0
-  firebase_auth: ^5.3.1
-
-  # Auth (local token storage)
+  # Auth (local token + session storage)
   shared_preferences: ^2.2.3
 
   # Location
@@ -56,6 +52,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - settings.json
 
 flutter_launcher_icons:
   android: true

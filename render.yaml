@@ -3,12 +3,20 @@ services:
     name: flask-app
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
+    startCommand: gunicorn --worker-class eventlet -w 1 wsgi:app
     envVars:
-      - key: MONGO_URI
-        sync: false
       - key: FLASK_ENV
         value: production
+      - key: SUPABASE_SMTP_HOST
+        sync: false
+      - key: SUPABASE_SMTP_PORT
+        value: "465"
+      - key: SUPABASE_SMTP_USER
+        sync: false
+      - key: SUPABASE_SMTP_PASS
+        sync: false
+      - key: SUPABASE_FROM_EMAIL
+        sync: false
     scaling:
       minInstances: 1
       maxInstances: 3

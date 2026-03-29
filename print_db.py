@@ -14,7 +14,6 @@ def json_serial(obj):
 
 print(f"Database: {db.name}")
 print("=" * 30)
-print("...")
 
 collections = db.list_collection_names()
 if not collections:

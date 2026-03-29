@@ -15,15 +15,15 @@ class LinkAccountPage extends StatefulWidget {
 }
 
 class _LinkAccountPageState extends State<LinkAccountPage> {
-  final _accountController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isScanning = false;
+  final _emailController  = TextEditingController();
+  bool _isScanning        = false;
+  bool _loading           = false;
+  String? _error;
   MobileScannerController? _scannerController;
 
   @override
   void dispose() {
-    _accountController.dispose();
-    _passwordController.dispose();
+    _emailController.dispose();
     _scannerController?.dispose();
     super.dispose();
   }
@@ -42,81 +42,98 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
 
   bool _hasNavigated = false;
 
+  // ---------------------------------------------------------------------------
+  // QR detect — same logic as before, untouched
+  // ---------------------------------------------------------------------------
   void _onDetect(BarcodeCapture capture) async {
-    // Guard: onDetect can fire multiple times before the scanner is closed.
     if (_hasNavigated) return;
 
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final barcode in barcodes) {
-      if (barcode.rawValue != null) {
-        final code = barcode.rawValue!;
-        final parts = code.split(':');
+    for (final barcode in capture.barcodes) {
+      if (barcode.rawValue == null) continue;
 
-        // Format: email:kodomo_link_userId
-        if (parts.length >= 2) {
-          final email = parts[0];
-          final linkToken =
-              parts.sublist(1).join(':'); // Handle case if email contains ':'
+      final code  = barcode.rawValue!;
+      final parts = code.split(':');
 
-          _accountController.text = email;
-          _passwordController.text = linkToken;
+      // Format: email:kodomo_link_userId
+      if (parts.length >= 2) {
+        final email     = parts[0];
+        final linkToken = parts.sublist(1).join(':');
 
-          if (mounted) {
-            // Auto-link if valid token
-            if (linkToken.startsWith('kodomo_link_')) {
-              _hasNavigated = true;
+        if (linkToken.startsWith('kodomo_link_')) {
+          _hasNavigated = true;
 
-              // 1. Stop scanner immediately
-              _scannerController?.stop();
+          _scannerController?.stop();
+          setState(() => _isScanning = false);
+          _scannerController?.dispose();
+          _scannerController = null;
 
-              // 2. Remove the MobileScanner widget from the tree
-              setState(() {
-                _isScanning = false;
-              });
+          await Future.delayed(const Duration(milliseconds: 100));
+          if (!mounted) return;
 
-              // 3. Dispose the controller (camera teardown)
-              _scannerController?.dispose();
-              _scannerController = null;
+          final childUserId = linkToken.replaceFirst('kodomo_link_', '');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Child account found: $email'),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+            ),
+          );
 
-              // 4. Wait a frame for the widget tree to settle
-              await Future.delayed(const Duration(milliseconds: 100));
-              if (!mounted) return;
-
-              final childUserId = linkToken.replaceFirst('kodomo_link_', '');
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Child account found: $email'),
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                ),
+          context.read<AppSession>().linkChild(
+                childName: email,
+                childUserId: childUserId,
               );
-
-              // 5. Link and navigate
-              context.read<AppSession>().linkChild(
-                    childName: email,
-                    childUserId: childUserId,
-                  );
-              context.go(AppRoutes.dashboard);
-            } else {
-              _toggleScanner();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('QR Code Scanned!')),
-              );
-            }
-          }
+          context.go(AppRoutes.dashboard);
         } else {
-          _accountController.text = code;
-          if (mounted) {
-            _toggleScanner();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('QR Code Scanned!')),
-            );
-          }
+          _emailController.text = email;
+          _toggleScanner();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('QR Code Scanned!')),
+          );
         }
-        break;
+      } else {
+        _emailController.text = code;
+        _toggleScanner();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('QR Code Scanned!')),
+        );
       }
+      break;
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Email Method — lookup child by email via backend
+  // ---------------------------------------------------------------------------
+  Future<void> _linkByEmail() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      setState(() => _error = 'Please enter the child\'s email address.');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error   = null;
+    });
+
+    final session = context.read<AppSession>();
+    final errorMsg = await session.lookupChildByEmail(email);
+
+    if (!mounted) return;
+
+    if (errorMsg != null) {
+      setState(() {
+        _loading = false;
+        _error   = errorMsg;
+      });
+    } else {
+      context.go(AppRoutes.dashboard);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -155,62 +172,24 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                 const SizedBox(height: AppSpacing.lg),
                 Text(
                   'Link Child Account',
-                  style: context.textStyles.headlineLarge?.copyWith(
-                    color: scheme.onSurface,
-                  ),
+                  style: context.textStyles.headlineLarge
+                      ?.copyWith(color: scheme.onSurface),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   'Link the child device to start tracking.',
-                  style: context.textStyles.bodyLarge?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+                  style: context.textStyles.bodyLarge
+                      ?.copyWith(color: scheme.onSurfaceVariant),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: AppSpacing.xl),
-                // Method selection row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Email Method',
-                      style: context.textStyles.titleMedium?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                      child: Text(
-                        '|',
-                        style: context.textStyles.titleMedium?.copyWith(
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.3),
-                        ),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: _toggleScanner,
-                      child: Text(
-                        'Scan QR',
-                        style: context.textStyles.titleMedium?.copyWith(
-                          color: scheme.primary,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                          decorationColor: scheme.primary,
-                          decorationThickness: 2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
+
+                // ── Email Method ──────────────────────────────────────────
                 GradientCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Email Method section header
                       Row(
                         children: [
                           Icon(Icons.email_outlined,
@@ -225,47 +204,66 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'Enter the child\'s registered email address.',
+                        style: context.textStyles.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
                       const SizedBox(height: AppSpacing.md),
                       TextFormField(
-                        controller: _accountController,
+                        controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _linkByEmail(),
                         decoration: const InputDecoration(
-                          labelText: 'Email',
+                          labelText: 'Child\'s Email',
+                          hintText: 'child@example.com',
                           prefixIcon: Icon(Icons.email_outlined),
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.md),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: Icon(Icons.lock_outline_rounded),
+
+                      // Error message
+                      if (_error != null) ...[
+                        const SizedBox(height: AppSpacing.md),
+                        Container(
+                          padding: AppSpacing.paddingMd,
+                          decoration: BoxDecoration(
+                            color: scheme.errorContainer,
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.md),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded,
+                                  color: scheme.onErrorContainer),
+                              const SizedBox(width: AppSpacing.sm),
+                              Expanded(
+                                child: Text(
+                                  _error!,
+                                  style: context.textStyles.bodyMedium
+                                      ?.copyWith(
+                                          color: scheme.onErrorContainer),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                      ],
+
                       const SizedBox(height: AppSpacing.xl),
                       PrimaryPillButton(
-                        label: 'Link Account',
-                        onPressed: () {
-                          if (_accountController.text.trim().isNotEmpty &&
-                              _passwordController.text.trim().isNotEmpty) {
-                            final pwd = _passwordController.text.trim();
-                            final childUserId = pwd.startsWith('kodomo_link_')
-                                ? pwd.replaceFirst('kodomo_link_', '')
-                                : pwd;
-                            context.read<AppSession>().linkChild(
-                                  childName: _accountController.text.trim(),
-                                  childUserId: childUserId,
-                                );
-                            context.go(AppRoutes.dashboard);
-                          }
-                        },
+                        label: _loading ? 'Linking…' : 'Link Account',
+                        icon: Icons.link_rounded,
+                        onPressed: _loading ? null : _linkByEmail,
                       ),
                     ],
                   ),
                 ),
+
                 const SizedBox(height: AppSpacing.xl),
-                // Scan QR section
+
+                // ── QR Method ─────────────────────────────────────────────
                 GradientCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -275,27 +273,20 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                           Icon(Icons.qr_code_scanner_rounded,
                               size: 20, color: scheme.primary),
                           const SizedBox(width: AppSpacing.sm),
-                          GestureDetector(
-                            onTap: _toggleScanner,
-                            child: Text(
-                              'Scan QR',
-                              style: context.textStyles.titleSmall?.copyWith(
-                                color: scheme.primary,
-                                fontWeight: FontWeight.w600,
-                                decoration: TextDecoration.underline,
-                                decorationColor: scheme.primary,
-                                decorationThickness: 2,
-                              ),
+                          Text(
+                            'Scan QR Code',
+                            style: context.textStyles.titleSmall?.copyWith(
+                              color: scheme.primary,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: AppSpacing.md),
                       Text(
-                        'Scan the QR code from the child device. The QR code contains the email and password for automatic linking.',
-                        style: context.textStyles.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
+                        'Scan the QR code shown on the child\'s Profile page for instant linking.',
+                        style: context.textStyles.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant),
                       ),
                       const SizedBox(height: AppSpacing.md),
                       OutlinedButton.icon(
@@ -303,25 +294,19 @@ class _LinkAccountPageState extends State<LinkAccountPage> {
                         icon: const Icon(Icons.qr_code_scanner_rounded),
                         label: const Text('Open Scanner'),
                         style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 16),
                           side: BorderSide(
-                              color: scheme.outline.withValues(alpha: 0.3)),
+                              color:
+                                  scheme.outline.withValues(alpha: 0.3)),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadius.lg),
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.lg),
                           ),
                         ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  'QR Code Format: email:password',
-                  style: context.textStyles.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-                    fontStyle: FontStyle.italic,
-                  ),
-                  textAlign: TextAlign.center,
                 ),
               ],
             ),
