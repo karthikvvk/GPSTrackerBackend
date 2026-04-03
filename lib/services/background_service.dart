@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:gpstracking/data/local_db.dart';
 import 'package:gpstracking/data/models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Background service for persistent location tracking.
 ///
@@ -74,6 +75,10 @@ class BackgroundService {
   /// Start background tracking
   static Future<void> startService(String userId) async {
     if (!_isSupported) return;
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('bg_user_id', userId);
+    
     await _service.startService();
     _service.invoke('setUserId', {'userId': userId});
   }
@@ -94,7 +99,9 @@ class BackgroundService {
   static Future<void> _onStart(ServiceInstance service) async {
     DartPluginRegistrant.ensureInitialized();
 
-    String? userId;
+    final prefs = await SharedPreferences.getInstance();
+    String? userId = prefs.getString('bg_user_id');
+    
     bool isTracking = false;
     bool busy = false;
     StreamSubscription<Position>? positionSub;
@@ -102,6 +109,7 @@ class BackgroundService {
     // Listen for commands
     service.on('setUserId').listen((event) {
       userId = event?['userId'] as String?;
+      prefs.setString('bg_user_id', userId ?? '');
       if (kDebugMode) {
         print('[BackgroundService] User ID set: $userId');
       }
