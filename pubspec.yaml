@@ -43,7 +43,8 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   mobile_scanner: ^5.2.3
   qr_flutter: ^4.1.0
-
+  photo_manager: ^3.0.0
+  image_picker: ^1.1.2
 dev_dependencies:
   flutter_test:
     sdk: flutter

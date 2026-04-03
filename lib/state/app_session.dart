@@ -52,7 +52,6 @@ class AppSession extends ChangeNotifier {
   StreamSubscription? _syncBatchSub;
   final List<String> _trackingLogs = [];
 
-  // Fires when an entire sync run completes (done=true received).
   final _syncCompletedController = StreamController<void>.broadcast();
   Stream<void> get syncCompleted => _syncCompletedController.stream;
 
@@ -81,7 +80,6 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  /// Display name of the currently signed-in account
   String _viewerName = 'You';
   String? _linkedChildName;
 
@@ -109,10 +107,29 @@ class AppSession extends ChangeNotifier {
       _email = _authService.email;
       _viewerName = _displayName ?? 'You';
 
-      // Restore role if saved
       final roleStr = _authService.role;
       if (roleStr != null) {
         _role = roleStr == 'child' ? UserRole.child : UserRole.parent;
+      }
+
+      // FIX 3: Restore linked child from persisted storage so pages
+      // that call triggerSync() on load don't crash with null _selectedChildId.
+      final linkedChildId = _authService.linkedChildId;
+      final linkedChildName = _authService.linkedChildName;
+      if (linkedChildId != null && linkedChildName != null) {
+        _selectedChildId = linkedChildId;
+        _linkedChildName = linkedChildName;
+        _linkedChildren = [
+          LinkedChild(
+            odemoId: linkedChildId,
+            displayName: linkedChildName,
+            email: linkedChildName,
+          )
+        ];
+        if (kDebugMode) {
+          print(
+              '[AppSession] Restored linked child: $linkedChildId ($linkedChildName)');
+        }
       }
 
       notifyListeners();
@@ -123,7 +140,6 @@ class AppSession extends ChangeNotifier {
   // Authentication Methods
   // =========================================================================
 
-  /// Sign in with email and password
   Future<bool> signInWithEmail(String email, String password) async {
     try {
       final user = await _authService.login(email: email, password: password);
@@ -134,7 +150,6 @@ class AppSession extends ChangeNotifier {
         _email = user['email'];
         _viewerName = _displayName ?? 'You';
 
-        // Restore role if saved
         final roleStr = user['role'];
         if (roleStr != null) {
           _role = roleStr == 'child' ? UserRole.child : UserRole.parent;
@@ -150,7 +165,6 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  /// Create account without automatic sign-in state update (for custom flows)
   Future<Map<String, dynamic>?> createAccount(
       String email, String password, String displayName) async {
     try {
@@ -165,7 +179,6 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  /// Manually complete sign-in after custom flow
   void completeSignIn(Map<String, dynamic> user) {
     _signedIn = true;
     _userId = user['user_id'];
@@ -181,7 +194,6 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sign up with email and password
   Future<bool> signUpWithEmail(
       String email, String password, String displayName) async {
     try {
@@ -201,16 +213,15 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  /// Sign out
   Future<void> signOut() async {
-    // Stop tracking and disconnect relay before clearing state
     _locationService?.stopTracking();
     _liveLocationSub?.cancel();
     _childStatusSub?.cancel();
+    _syncBatchSub?.cancel();
     _relayService?.disconnect();
     _relayService = null;
 
-    await _authService.signOut();
+    await _authService.signOut(); // also clears linkedChildId/Name
     _signedIn = false;
     _userId = null;
     _displayName = null;
@@ -220,12 +231,11 @@ class AppSession extends ChangeNotifier {
     _lastLocation = null;
     _linkedChildren = [];
     _selectedChildId = null;
-    _viewerName = 'You';
     _linkedChildName = null;
+    _viewerName = 'You';
     notifyListeners();
   }
 
-  /// Simulate sign in (for testing)
   void signIn() {
     _signedIn = true;
     notifyListeners();
@@ -235,15 +245,12 @@ class AppSession extends ChangeNotifier {
   // Role Methods
   // =========================================================================
 
-  /// Set user role
   void setRole(UserRole role) {
     _role = role;
-    // Save role to backend
     _authService.updateRole(role == UserRole.child ? 'child' : 'parent');
     notifyListeners();
   }
 
-  /// Clear role (go back to role selection)
   void clearRole() {
     _role = null;
     notifyListeners();
@@ -253,19 +260,16 @@ class AppSession extends ChangeNotifier {
   // Tracking Methods (Child)
   // =========================================================================
 
-  /// Update tracking status
   void setTrackingActive(bool active) {
     _trackingActive = active;
     notifyListeners();
   }
 
-  /// Update last location
   void updateLocation(CoordinateLog location) {
     _lastLocation = location;
     notifyListeners();
   }
 
-  /// Update child online status (parent mode)
   void setChildOnline(bool online) {
     _childOnline = online;
     notifyListeners();
@@ -275,14 +279,8 @@ class AppSession extends ChangeNotifier {
   // Child Relay Methods
   // =========================================================================
 
-  /// Connect the child to the relay server and register as online.
-  ///
-  /// Call this when the child dashboard loads so the child appears "online"
-  /// to parents even before tracking is started (e.g. user is at home,
-  /// app is open but GPS sharing is off).
   Future<void> connectChildRelay() async {
     if (_userId == null || !isChild) return;
-    // Already connected as child — nothing to do.
     if (_relayService != null && _relayService!.isConnected) return;
 
     _relayService?.disconnect();
@@ -291,21 +289,14 @@ class AppSession extends ChangeNotifier {
     if (kDebugMode) print('[AppSession] Child relay connected (presence only)');
   }
 
-  /// Start GPS location tracking (child mode).
-  ///
-  /// Reuses the relay connection if already established by [connectChildRelay].
-  /// Pass a [BuildContext] to prompt the user for location permissions.
   Future<void> startTracking([BuildContext? context]) async {
     if (_trackingActive || _userId == null) return;
 
-    // Ensure location services & permissions before starting
     if (context != null) {
       final ok = await ensureLocationEnabled(context);
       if (!ok) return;
     }
 
-    // Reuse the existing child-mode relay if it's already connected.
-    // Only tear down + recreate if the relay is missing or in parent mode.
     if (_relayService == null || !_relayService!.isConnected) {
       _liveLocationSub?.cancel();
       _childStatusSub?.cancel();
@@ -335,29 +326,57 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Connect relay as parent, subscribe to live stream, and trigger DB sync.
+  // =========================================================================
+  // Parent Relay Methods
+  // =========================================================================
+
+  /// Connect relay as parent, subscribe to live stream, and set up sync listener.
+  ///
+  /// FIX 1: Now passes childId directly to connect() so RelayService has it
+  /// from the start — no more null childId assert crash.
+  ///
+  /// FIX 2: Removed the incorrect subscribeToChild() call before connect().
+  /// The new connect() handles subscription internally via _onConnected().
   Future<void> connectAsParent(String childId) async {
     if (_userId == null) return;
 
-    // Idempotency guard — don't reconnect if already watching this child.
+    // Guard: never connect as parent to your own userId
+    if (childId == _userId) {
+      if (kDebugMode) {
+        print('[AppSession] ❌ connectAsParent blocked: childId == own userId');
+        print(
+            '[AppSession]    This means _selectedChildId was never set correctly.');
+        print('[AppSession]    Call linkChild() before connectAsParent().');
+      }
+      return;
+    }
+
+    // Idempotency guard
     if (_selectedChildId == childId && (_relayService?.isConnected ?? false)) {
       return;
     }
 
-    // Tear down any existing relay cleanly.
+    // Tear down cleanly
     _liveLocationSub?.cancel();
     _childStatusSub?.cancel();
     _syncBatchSub?.cancel();
     _relayService?.disconnect();
     _relayService = RelayService();
 
-    // Set _pendingChildId before connecting so the subscription fires
-    // inside onConnect — not before the socket is open.
-    _relayService!.subscribeToChild(childId);
+    // FIX 1+2: Pass childId directly to connect() — no subscribeToChild() before connect()
+    await _relayService!.connect(
+      userId: _userId!,
+      isChild: false,
+      childId: childId, // ← this was missing before, causing the assert crash
+    );
 
-    await _relayService!.connect(userId: _userId!, isChild: false);
+    if (kDebugMode) {
+      print('[AppSession] connectAsParent: connected as parent');
+      print('[AppSession]   parentId = $_userId');
+      print('[AppSession]   childId  = $childId');
+    }
 
-    // Listen for live locations and persist to local SQLite (history calendar).
+    // Listen for live locations
     _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
       _lastLocation = coord;
       notifyListeners();
@@ -366,15 +385,13 @@ class AppSession extends ChangeNotifier {
       });
     });
 
-    // Listen for child online/offline status.
+    // Listen for child online/offline status
     _childStatusSub = _relayService!.childStatusStream.listen((online) {
       _childOnline = online;
       notifyListeners();
     });
 
-    // Collect sync batch records and flush them all in one DB transaction.
-    // This avoids the DB lock contention from individual insertLog calls
-    // competing with the background service's continuous location writes.
+    // Collect sync batches and flush to DB
     _syncBatchSub = _relayService!.syncBatchStream.listen((batch) async {
       final rawCoords = batch.coords;
       final done = batch.done;
@@ -397,27 +414,21 @@ class AppSession extends ChangeNotifier {
         await LocalDb.insertLogsBatch(coords).catchError((e) {
           if (kDebugMode) print('[AppSession] Sync batch insert error: $e');
         });
-        if (kDebugMode) print('[AppSession] Batch inserted ${coords.length} records');
+        if (kDebugMode)
+          print('[AppSession] Batch inserted ${coords.length} records');
       }
       if (done) {
         _syncCompletedController.add(null);
-        if (kDebugMode) print('[AppSession] Sync complete — notified listeners');
+        if (kDebugMode)
+          print('[AppSession] Sync complete — notified listeners');
       }
     });
-    // NOTE: auto-sync is NOT triggered here intentionally.
-    // Sync is triggered explicitly by History/TripDetails page visits via triggerSync().
   }
 
-
-  /// Stop GPS tracking but keep the relay alive (child stays "online").
   Future<void> stopTracking() async {
     _locationService?.stopTracking();
     await BackgroundService.stopService();
-
-    // Detach relay from location service so no more pushLocation calls,
-    // but keep the WebSocket open so the child stays visible as "online".
     _locationService?.attachRelay(null);
-
     _trackingActive = false;
     _trackingLogs.add('Stopped tracking');
     notifyListeners();
@@ -427,7 +438,6 @@ class AppSession extends ChangeNotifier {
   // Linked Children Methods (Parent)
   // =========================================================================
 
-  /// Add a linked child
   void addLinkedChild(LinkedChild child) {
     _linkedChildren.add(child);
     if (_selectedChildId == null) {
@@ -436,7 +446,6 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Remove a linked child
   void removeLinkedChild(String odemoId) {
     _linkedChildren.removeWhere((c) => c.odemoId == odemoId);
     if (_selectedChildId == odemoId) {
@@ -446,13 +455,11 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Select which child to view
   void selectChild(String? odemoId) {
     _selectedChildId = odemoId;
     notifyListeners();
   }
 
-  /// Update a child's last location
   void updateChildLocation(String odemoId, CoordinateLog location) {
     final index = _linkedChildren.indexWhere((c) => c.odemoId == odemoId);
     if (index != -1) {
@@ -464,12 +471,27 @@ class AppSession extends ChangeNotifier {
     }
   }
 
-  /// Link a child account by name and userId.
+  /// Link a child account by name and userId, then persist it so it
+  /// survives app restarts.
+  ///
+  /// FIX 3: Now persists linkedChildId and linkedChildName to SharedPreferences
+  /// via AuthService so _selectedChildId is never null after a restart.
   void linkChild({required String childName, required String childUserId}) {
+    // Guard: never link own account as child
+    if (childUserId == _userId) {
+      if (kDebugMode) {
+        print(
+            '[AppSession] ❌ linkChild blocked: childUserId == own userId ($childUserId)');
+        print(
+            '[AppSession]    The parent tried to link themselves as the child.');
+        print('[AppSession]    Check the QR/email lookup result.');
+      }
+      return;
+    }
+
     final trimmed = childName.trim();
     _linkedChildName = trimmed.isEmpty ? null : trimmed;
 
-    // Register as a full LinkedChild so data-fetching works.
     final alreadyLinked = _linkedChildren.any((c) => c.odemoId == childUserId);
     if (!alreadyLinked && trimmed.isNotEmpty) {
       _linkedChildren.add(LinkedChild(
@@ -479,26 +501,26 @@ class AppSession extends ChangeNotifier {
       ));
     }
     _selectedChildId = childUserId;
+
+    // FIX 3: Persist so it survives app restarts
+    _authService.saveLinkedChild(childUserId: childUserId, childName: trimmed);
+
     notifyListeners();
 
-    // After linking, establish the relay connection and kick off a full sync
-    // so the History calendar starts populating immediately.
+    // Connect relay and kick off full sync
     connectAsParent(childUserId);
   }
 
-  /// Look up a child account by email via the backend, then link it.
-  /// Used by the parent's Email Method on the Link Account page.
-  /// Returns an error message string on failure, or null on success.
   Future<String?> lookupChildByEmail(String email) async {
     try {
       final user = await _authService.lookupByEmail(email.trim().toLowerCase());
       if (user == null) return 'No user found with that email.';
       final childUserId = user['user_id'] as String;
-      final childName   = (user['display_name'] as String?)?.isNotEmpty == true
+      final childName = (user['display_name'] as String?)?.isNotEmpty == true
           ? user['display_name'] as String
           : user['email'] as String? ?? email;
       linkChild(childName: childName, childUserId: childUserId);
-      return null; // success
+      return null;
     } catch (e) {
       if (kDebugMode) print('[AppSession] lookupChildByEmail error: $e');
       return e.toString().replaceAll('Exception: ', '');
@@ -506,36 +528,43 @@ class AppSession extends ChangeNotifier {
   }
 
   /// Request an incremental DB sync for the currently selected child.
-  ///
-  /// Safe to call from any page (History calendar, Live Map, etc.).
-  /// Automatically connects the relay if it isn't already up.
+  /// Safe to call from any page — guards against null selectedChildId.
   Future<void> triggerSync() async {
     final childId = _selectedChildId;
+
+    // FIX 3: Guard against null _selectedChildId (happens after restart
+    // if linked child was not persisted)
     if (childId == null) {
-      if (kDebugMode) print('[AppSession] triggerSync: no child selected — skipped');
+      if (kDebugMode)
+        print('[AppSession] triggerSync: no child selected — skipped');
       return;
     }
 
-    // Ensure relay exists and is connected as parent.
-    // connectAsParent is idempotent — safe to call even if already connected.
-    if (_relayService == null || !_relayService!.isConnected) {
-      if (kDebugMode) print('[AppSession] triggerSync: relay not ready — connecting first');
-      await connectAsParent(childId);
-      // requestSync uses _pendingSyncChildId to queue if socket isn't open yet.
+    if (childId == _userId) {
+      if (kDebugMode)
+        print('[AppSession] triggerSync: childId == own userId — skipped');
+      return;
     }
 
-    // Request full history sync (requestSync queues if still connecting).
+    if (_relayService == null || !_relayService!.isConnected) {
+      if (kDebugMode)
+        print('[AppSession] triggerSync: relay not ready — connecting first');
+      await connectAsParent(childId);
+    }
+
     _relayService?.requestSync(childId);
-    if (kDebugMode) print('[AppSession] triggerSync: sync requested for $childId');
+    if (kDebugMode)
+      print('[AppSession] triggerSync: sync requested for $childId');
   }
 
-  /// Removes the linked child account.
   void unlinkChild() {
     _linkedChildName = null;
     _linkedChildren.clear();
     _selectedChildId = null;
+    _authService.clearLinkedChild();
     notifyListeners();
   }
+
   // =========================================================================
   // Theme State
   // =========================================================================

@@ -58,35 +58,35 @@ init_db()
 # ---------------------------------------------------------------------------
 # Email (Supabase SMTP relay)
 # ---------------------------------------------------------------------------
-_SMTP_HOST = os.environ.get('SUPABASE_SMTP_HOST')
-_SMTP_PORT = int(os.environ.get('SUPABASE_SMTP_PORT', '465'))
-_SMTP_USER = os.environ.get('SUPABASE_SMTP_USER')
-_SMTP_PASS = os.environ.get('SUPABASE_SMTP_PASS')
-_FROM_EMAIL = os.environ.get('SUPABASE_FROM_EMAIL')
+# _SMTP_HOST = os.environ.get('SUPABASE_SMTP_HOST')
+# _SMTP_PORT = int(os.environ.get('SUPABASE_SMTP_PORT', '465'))
+# _SMTP_USER = os.environ.get('SUPABASE_SMTP_USER')
+# _SMTP_PASS = os.environ.get('SUPABASE_SMTP_PASS')
+# _FROM_EMAIL = os.environ.get('SUPABASE_FROM_EMAIL')
 
 
-def _send_email_sync(to: str, subject: str, html_body: str):
-    """Send a transactional email via Supabase SMTP relay (blocking)."""
-    if not all([_SMTP_HOST, _SMTP_USER, _SMTP_PASS, _FROM_EMAIL]):
-        print('[Email] SMTP not configured — skipping email.')
-        return
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = _FROM_EMAIL
-        msg['To'] = to
-        msg.attach(MIMEText(html_body, 'html'))
-        with smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT) as server:
-            server.login(_SMTP_USER, _SMTP_PASS)
-            server.send_message(msg)
-        print(f'[Email] Sent "{subject}" → {to}')
-    except Exception as e:
-        print(f'[Email] Failed to send email: {e}')
+# def _send_email_sync(to: str, subject: str, html_body: str):
+#     """Send a transactional email via Supabase SMTP relay (blocking)."""
+#     if not all([_SMTP_HOST, _SMTP_USER, _SMTP_PASS, _FROM_EMAIL]):
+#         print('[Email] SMTP not configured — skipping email.')
+#         return
+#     try:
+#         msg = MIMEMultipart('alternative')
+#         msg['Subject'] = subject
+#         msg['From'] = _FROM_EMAIL
+#         msg['To'] = to
+#         msg.attach(MIMEText(html_body, 'html'))
+#         with smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT) as server:
+#             server.login(_SMTP_USER, _SMTP_PASS)
+#             server.send_message(msg)
+#         print(f'[Email] Sent "{subject}" → {to}')
+#     except Exception as e:
+#         print(f'[Email] Failed to send email: {e}')
 
 
-def send_email(to: str, subject: str, html_body: str):
-    """Fire-and-forget email sending — runs in a background thread."""
-    threading.Thread(target=_send_email_sync, args=(to, subject, html_body), daemon=True).start()
+# def send_email(to: str, subject: str, html_body: str):
+#     """Fire-and-forget email sending — runs in a background thread."""
+#     threading.Thread(target=_send_email_sync, args=(to, subject, html_body), daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ def register():
       <p style="color:#999;font-size:12px">If you didn't create this account, please ignore this email.</p>
     </div>
     </body></html>'''
-    send_email(email, 'Welcome to GPS Tracker!', welcome_html)
+    # send_email(email, 'Welcome to GPS Tracker!', welcome_html)
 
     return jsonify({
         "status": "success",
@@ -419,14 +419,18 @@ def handle_child_dates_response(data):
 @socketio.on('parent_subscribe')
 def handle_parent_subscribe(data):
     """Parent subscribes to a child's live location stream.
-    data: { "childId": "..." }
+    data: { "childId": "...", "parentId": "..." (optional) }
     """
     child_id = data.get('childId')
+    parent_id = data.get('parentId')
     if not child_id:
         emit('error', {'message': 'Missing childId'})
         return
 
     sid = request.sid
+    if parent_id:
+        join_room(f'parent_{parent_id}')
+
     if sid in parent_subscriptions:
         old_child = parent_subscriptions[sid]
         leave_room(f'watch_{old_child}')
@@ -448,6 +452,7 @@ def handle_parent_request_history(data):
     """Parent requests historical data for a specific date from a child."""
     child_id = data.get('childId')
     date = data.get('date')
+    parent_id = data.get('parentId')
     request_id = data.get('requestId', str(uuid.uuid4()))
 
     if not child_id or not date:
@@ -459,10 +464,11 @@ def handle_parent_request_history(data):
         return
 
     child_sid = connected_children[child_id]
+    target_room = f"parent_{parent_id}" if parent_id else request.sid
     socketio.emit('history_request', {
         'requestId': request_id,
         'date': date,
-        'parentSid': request.sid,
+        'parentSid': target_room,
     }, room=child_sid)
 
 
@@ -470,6 +476,7 @@ def handle_parent_request_history(data):
 def handle_parent_request_dates(data):
     """Parent requests available history dates from a child."""
     child_id = data.get('childId')
+    parent_id = data.get('parentId')
     request_id = data.get('requestId', str(uuid.uuid4()))
 
     if not child_id:
@@ -481,19 +488,21 @@ def handle_parent_request_dates(data):
         return
 
     child_sid = connected_children[child_id]
+    target_room = f"parent_{parent_id}" if parent_id else request.sid
     socketio.emit('dates_request', {
         'requestId': request_id,
-        'parentSid': request.sid,
+        'parentSid': target_room,
     }, room=child_sid)
 
 
 @socketio.on('parent_request_sync')
 def handle_parent_request_sync(data):
     """Parent requests a historical DB sync from the child.
-    data: { "childId": "...", "fromTimestamp": "..." | null }
+    data: { "childId": "...", "fromTimestamp": "..." | null, "parentId": "..." }
     """
     child_id = data.get('childId')
     from_timestamp = data.get('fromTimestamp')
+    parent_id = data.get('parentId')
 
     if not child_id:
         emit('error', {'message': 'Missing childId'})
@@ -504,9 +513,10 @@ def handle_parent_request_sync(data):
         return
 
     child_sid = connected_children[child_id]
-    print(f'[WS] Parent {request.sid} requested sync from child {child_id} (from={from_timestamp})')
+    target_room = f"parent_{parent_id}" if parent_id else request.sid
+    print(f'[WS] Parent {target_room} requested sync from child {child_id} (from={from_timestamp})')
     socketio.emit('sync_request', {
-        'parentSid': request.sid,
+        'parentSid': target_room,
         'fromTimestamp': from_timestamp,
     }, room=child_sid)
 

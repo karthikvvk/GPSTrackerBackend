@@ -9,7 +9,14 @@ android {
     namespace = "com.example.gpstracking"
     compileSdk = flutter.compileSdkVersion
     // ndkVersion = flutter.ndkVersion  // Commented out - not needed for this app
-
+configurations.all {
+    resolutionStrategy {
+        force("androidx.activity:activity:1.9.3")
+        force("androidx.activity:activity-ktx:1.9.3")
+        force("androidx.core:core:1.13.1")
+        force("androidx.core:core-ktx:1.13.1")
+    }
+}
     compileOptions {
         // Enable core library desugaring
         isCoreLibraryDesugaringEnabled = true

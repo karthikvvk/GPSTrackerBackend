@@ -4,27 +4,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gpstracking/utils/settings.dart';
 
 /// Authentication service — manual HTTP-based auth against the Flask backend.
-/// No Firebase. Sessions are persisted in SharedPreferences.
 class AuthService {
   SharedPreferences? _prefs;
 
-  // SharedPreferences keys
   static const String _keyUserId = 'user_id';
   static const String _keyEmail = 'user_email';
   static const String _keyDisplayName = 'user_display_name';
   static const String _keyRole = 'user_role';
 
-  // In-memory cache
+  // FIX 3: Keys for persisting the linked child across restarts
+  static const String _keyLinkedChildId = 'linked_child_id';
+  static const String _keyLinkedChildName = 'linked_child_name';
+
   String? _userId;
   String? _email;
   String? _displayName;
   String? _role;
+  String? _linkedChildId;
+  String? _linkedChildName;
 
   AuthService();
-
-  // ---------------------------------------------------------------------------
-  // Initialisation — restores persisted session on app start
-  // ---------------------------------------------------------------------------
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
@@ -32,11 +31,9 @@ class AuthService {
     _email = _prefs?.getString(_keyEmail);
     _displayName = _prefs?.getString(_keyDisplayName);
     _role = _prefs?.getString(_keyRole);
+    _linkedChildId = _prefs?.getString(_keyLinkedChildId);
+    _linkedChildName = _prefs?.getString(_keyLinkedChildName);
   }
-
-  // ---------------------------------------------------------------------------
-  // Getters
-  // ---------------------------------------------------------------------------
 
   String? get userId => _userId;
   String? get email => _email;
@@ -44,11 +41,14 @@ class AuthService {
   String? get role => _role;
   bool get isSignedIn => _userId != null;
 
+  // FIX 3: Expose persisted linked child to AppSession on restore
+  String? get linkedChildId => _linkedChildId;
+  String? get linkedChildName => _linkedChildName;
+
   // ---------------------------------------------------------------------------
   // Register
   // ---------------------------------------------------------------------------
 
-  /// Register a new user. Returns the resolved user map on success.
   Future<Map<String, dynamic>?> register({
     required String email,
     required String password,
@@ -56,8 +56,6 @@ class AuthService {
   }) async {
     final settings = await Settings.instance;
     final url = Uri.parse('${settings.backendUrl}/auth/register');
-    print('printing url');
-    print(url);
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
@@ -67,15 +65,12 @@ class AuthService {
         'display_name': displayName,
       }),
     );
-    print(response);
     final body = jsonDecode(response.body) as Map<String, dynamic>;
-    print(body);
     if (response.statusCode == 201 && body['status'] == 'success') {
       final user = body['user'] as Map<String, dynamic>;
       await _persistSession(user);
       return user;
     }
-
     throw Exception(body['message'] ?? 'Registration failed');
   }
 
@@ -83,50 +78,40 @@ class AuthService {
   // Login
   // ---------------------------------------------------------------------------
 
-  /// Login with email and password. Returns the user map on success.
   Future<Map<String, dynamic>?> login({
     required String email,
     required String password,
   }) async {
     final settings = await Settings.instance;
     final url = Uri.parse('${settings.backendUrl}/auth/login');
-
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
     );
-
     final body = jsonDecode(response.body) as Map<String, dynamic>;
-
     if (response.statusCode == 200 && body['status'] == 'success') {
       final user = body['user'] as Map<String, dynamic>;
       await _persistSession(user);
       return user;
     }
-
     throw Exception(body['message'] ?? 'Login failed');
   }
 
   // ---------------------------------------------------------------------------
-  // Lookup by email (for parent linking a child account)
+  // Lookup by email
   // ---------------------------------------------------------------------------
 
-  /// Look up a user's public info (user_id, display_name) by email.
-  /// Used by the parent's "Link Account" email method.
   Future<Map<String, dynamic>?> lookupByEmail(String email) async {
     final settings = await Settings.instance;
     final url = Uri.parse(
       '${settings.backendUrl}/auth/lookup?email=${Uri.encodeComponent(email)}',
     );
-
     final response = await http.get(url);
     final body = jsonDecode(response.body) as Map<String, dynamic>;
-
     if (response.statusCode == 200 && body['status'] == 'success') {
       return body['user'] as Map<String, dynamic>;
     }
-
     throw Exception(body['message'] ?? 'User not found');
   }
 
@@ -134,12 +119,9 @@ class AuthService {
   // Update role
   // ---------------------------------------------------------------------------
 
-  /// Persist role locally and sync to the backend profile.
   Future<void> updateRole(String role) async {
     _role = role;
     await _prefs?.setString(_keyRole, role);
-
-    // Best-effort sync to backend — non-critical
     if (_userId != null) {
       try {
         final settings = await Settings.instance;
@@ -148,10 +130,31 @@ class AuthService {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'user_id': _userId, 'role': role}),
         );
-      } catch (_) {
-        // Ignore failures — role is already saved locally
-      }
+      } catch (_) {}
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // FIX 3: Save / clear linked child
+  // ---------------------------------------------------------------------------
+
+  /// Persist the linked child's ID and display name so it survives app restarts.
+  Future<void> saveLinkedChild({
+    required String childUserId,
+    required String childName,
+  }) async {
+    _linkedChildId = childUserId;
+    _linkedChildName = childName;
+    await _prefs?.setString(_keyLinkedChildId, childUserId);
+    await _prefs?.setString(_keyLinkedChildName, childName);
+  }
+
+  /// Clear the persisted linked child (called on unlink or sign out).
+  Future<void> clearLinkedChild() async {
+    _linkedChildId = null;
+    _linkedChildName = null;
+    await _prefs?.remove(_keyLinkedChildId);
+    await _prefs?.remove(_keyLinkedChildName);
   }
 
   // ---------------------------------------------------------------------------
@@ -163,10 +166,14 @@ class AuthService {
     _email = null;
     _displayName = null;
     _role = null;
+    _linkedChildId = null;
+    _linkedChildName = null;
     await _prefs?.remove(_keyUserId);
     await _prefs?.remove(_keyEmail);
     await _prefs?.remove(_keyDisplayName);
     await _prefs?.remove(_keyRole);
+    await _prefs?.remove(_keyLinkedChildId);
+    await _prefs?.remove(_keyLinkedChildName);
   }
 
   // ---------------------------------------------------------------------------
