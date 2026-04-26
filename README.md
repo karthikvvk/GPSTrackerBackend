@@ -2,6 +2,7 @@
 
 A real-time GPS tracking application with a **Flutter** mobile client and a **Flask + MongoDB** backend server. The app supports child–parent tracking, background location services, trip history, and QR-code-based device pairing.
 
+> [!NOTE]
 > **License:** GNU General Public License v3.0 — see [LICENSE](LICENSE).
 
 ---
@@ -10,6 +11,7 @@ A real-time GPS tracking application with a **Flutter** mobile client and a **Fl
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
+- [Communication & Transactions](#communication--transactions)
 - [Prerequisites](#prerequisites)
   - [Flutter SDK](#1-flutter-sdk)
   - [Android Studio & Android SDK](#2-android-studio--android-sdk)
@@ -38,16 +40,42 @@ A real-time GPS tracking application with a **Flutter** mobile client and a **Fl
 
 ## Architecture Overview
 
+The system follows a client-server architecture, specifically designed to handle background location updates, offline data persistence, and real-time parent-child device synchronization.
+
+```mermaid
+graph TD
+    subgraph Mobile Client [Flutter Mobile App]
+        UI[UI / View Layer]
+        State[State Management - Provider]
+        BGS[flutter_background_service]
+        SQLite[(Local SQLite DB)]
+        Geolocator(Location Sensors)
+    end
+
+    subgraph Backend [Flask Server]
+        API[REST API layer]
+        Sockets[Socket.IO / Eventlet]
+        BLL(Business Logic Layer)
+    end
+    
+    subgraph Database Layer
+        MongoDB[(MongoDB Atlas / Local)]
+    end
+
+    UI <--> State
+    State <--> API
+    State <--> Sockets
+    BGS --> Geolocator
+    BGS <--> SQLite
+    BGS --> API
+
+    API <--> BLL
+    Sockets <--> BLL
+    BLL <--> MongoDB
 ```
-┌──────────────────┐        HTTP / REST        ┌──────────────────────┐
-│  Flutter Mobile   │  ◄─────────────────────►  │  Flask Backend       │
-│  (Android)        │      /send, /sync, …      │  server.py           │
-│                   │                           │  ↕                   │
-│  • Firebase Auth  │                           │  MongoDB (Atlas or   │
-│  • Background GPS │                           │  local)              │
-│  • Offline SQLite │                           └──────────────────────┘
-└──────────────────┘
-```
+
+> [!NOTE]
+> The dual architecture of the client allows it to act as both a **Child** (transmitting location) and a **Parent** (monitoring location), relying heavily on background processing and robust real-time communication.
 
 | Layer              | Tech                                                                |
 | ------------------ | ------------------------------------------------------------------- |
@@ -56,11 +84,49 @@ A real-time GPS tracking application with a **Flutter** mobile client and a **Fl
 | Navigation         | go_router                                                           |
 | Maps               | flutter_map + OpenStreetMap                                         |
 | Background service | flutter_background_service                                          |
-| Backend API        | Flask, Flask-CORS                                                   |
-| Database           | MongoDB (via PyMongo)                                               |
-| Auth               | bcrypt password hashing (server-side) + Firebase (client-side init) |
+| Backend API        | Flask, Flask-CORS, Eventlet, Socket.IO                              |
+| Database           | MongoDB (via PyMongo) & SQLite (local fallback)                     |
+| Auth               | bcrypt password hashing (server-side)                               |
 | Deployment         | Render (gunicorn via `render.yaml`)                                 |
 | Releases           | Git tags + GitHub CLI (`gh`) via `ReleaseMaker.py`                  |
+
+---
+
+## Communication & Transactions
+
+The system uses a **Bimodal Communication Protocol** to optimize for battery life, reliability, and low latency.
+
+```mermaid
+sequenceDiagram
+    participant Child App
+    participant Flask Server
+    participant Parent App
+
+    Note over Child App, Parent App: 1. REST API (Batch & Sync)
+    Child App->>Child App: Store locations offline (SQLite)
+    Child App->>Flask Server: POST /send (Batch coordinates)
+    flask Server-->>Child App: 200 OK
+
+    Note over Child App, Parent App: 2. Real-Time WebSockets (Live Live-Tracking)
+    Child App->>Flask Server: emit('child_location_update')
+    Flask Server->>Parent App: emit('live_location')
+    
+    Note over Child App, Parent App: 3. On-Demand Sync
+    Parent App->>Flask Server: emit('parent_request_sync')
+    Flask Server->>Child App: emit('sync_request')
+    Child App->>Flask Server: emit('child_sync_batch')
+    Flask Server->>Parent App: emit('sync_batch')
+```
+
+### REST API (Stateless)
+Used for standard requests that tolerate regular HTTP overhead and don't require streaming.
+*   **Transactions:** `POST /auth/login`, `POST /send` (Batch Data Dump), `GET /history`.
+*   **Characteristics:** Secure, easy to load-balance, traditional Request/Response paradigm.
+
+### WebSockets / Socket.IO (Stateful)
+Used exclusively for live interactions where polling via HTTP would dramatically drain the battery and increase latency.
+*   **Transactions:** `child_online` presence detection, `child_location_update` real-time pipelining, and peer-to-peer style on-demand sync flows.
+*   **Characteristics:** Dedicated TCP connection, event-driven, bidirectional.
 
 ---
 
@@ -212,8 +278,6 @@ flutter pub get
 flutter doctor
 ```
 
-> **Firebase:** The app initializes Firebase in `main.dart`. For Android, make sure you have a valid `android/app/google-services.json` file. If you don't have one, create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com/), register your Android app (`com.example.gpstracking`), and download the config file.
-
 ### Backend Setup
 
 ```bash
@@ -246,6 +310,7 @@ This file is **gitignored** (it contains credentials). Create it manually in the
 | `db_name`     | Database name inside MongoDB               |
 | `debug_mode`  | `true` for verbose logging                 |
 
+> [!NOTE]
 > **For MongoDB Atlas**, replace `mongo_uri` with your Atlas connection string:
 >
 > ```
@@ -289,7 +354,8 @@ flutter devices          # list available devices
 flutter run -d <device>  # run on a specific one
 ```
 
-> **Important:** Make sure the Flutter app's backend URL in `settings.json` points to your machine's IP (not `localhost`) if testing on a physical device, since `localhost` on the phone refers to the phone itself.
+> [!IMPORTANT]
+> Make sure the Flutter app's backend URL in `settings.json` points to your machine's IP (not `localhost`) if testing on a physical device, since `localhost` on the phone refers to the phone itself.
 
 ---
 
@@ -312,7 +378,6 @@ flutter run -d <device>  # run on a specific one
 | Problem               | Fix                                                                                               |
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | `Gradle build failed` | Run `cd android && ./gradlew clean && cd ..` then `flutter run` again                             |
-| Firebase init fails   | Ensure `android/app/google-services.json` exists and matches your Firebase project                |
 | `minSdkVersion` error | The app uses `flutter.minSdkVersion` — update it in `android/app/build.gradle.kts` if needed      |
 | Device not found      | Run `flutter devices`, check USB debugging, or restart ADB: `adb kill-server && adb start-server` |
 
@@ -386,7 +451,8 @@ Output:
 ./build/app/outputs/bundle/release/app-release.aab
 ```
 
-> **Note:** The release build currently uses debug signing keys (see `android/app/build.gradle.kts`). For production Play Store releases, configure your own signing key — see [Flutter deployment docs](https://docs.flutter.dev/deployment/android).
+> [!NOTE]
+> The release build currently uses debug signing keys (see `android/app/build.gradle.kts`). For production Play Store releases, configure your own signing key — see [Flutter deployment docs](https://docs.flutter.dev/deployment/android).
 
 ---
 
@@ -464,6 +530,12 @@ python ReleaseMaker.py
 ## API Reference (Quick)
 
 All endpoints are served by `server.py` on port **5000**.
+
+### WebSockets (Socket.IO)
+
+- **Connection URL:** `/`
+- **Events (Child):** `child_online`, `child_location_update`, `child_sync_batch`
+- **Events (Parent):** `live_location`, `sync_batch`, `parent_request_sync`
 
 ### Auth
 
