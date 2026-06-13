@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gpstracking/data/local_db.dart';
@@ -19,6 +20,7 @@ class _TripsPageState extends State<TripsPage> {
   DateTime? _selectedDay;
   Map<DateTime, List<String>> _tripDates = {};
   bool isLoading = true;
+  StreamSubscription<void>? _syncSub;
 
   @override
   void initState() {
@@ -27,14 +29,23 @@ class _TripsPageState extends State<TripsPage> {
     // Trigger an incremental DB sync so the calendar shows data
     // fresh from the child every time the History tab is opened.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
       final session = context.read<AppSession>();
       if (session.isParent) {
+        // Listen for when the sync batch is fully done, then reload.
+        _syncSub?.cancel();
+        _syncSub = session.syncCompleted.listen((_) {
+          if (mounted) _loadTripDates();
+        });
         await session.triggerSync();
-        // Reload dates after sync has had a moment to start writing records.
-        await Future.delayed(const Duration(seconds: 2));
-        if (mounted) _loadTripDates();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _syncSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadTripDates() async {

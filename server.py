@@ -104,8 +104,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 connected_children = {}
 # Maps sid -> userId for reverse lookup
 sid_to_child = {}
-# Maps parentSid -> childId for active subscriptions
-parent_subscriptions = {}
+# Maps parentSid -> Set[childId] for active multi-room subscriptions
+parent_subscriptions: dict[str, set] = {}
 
 # =============================================================================
 # Auth Endpoints (REST)
@@ -346,9 +346,10 @@ def handle_disconnect():
         socketio.emit('child_offline', {'childId': child_id}, room=f'watch_{child_id}')
 
     if sid in parent_subscriptions:
-        child_id = parent_subscriptions.pop(sid)
-        leave_room(f'watch_{child_id}')
-        print(f'[WS] Parent {sid} unsubscribed from child {child_id}')
+        child_ids = parent_subscriptions.pop(sid)
+        for child_id in child_ids:
+            leave_room(f'watch_{child_id}')
+        print(f'[WS] Parent {sid} unsubscribed from children {child_ids}')
 
 
 # --- Child Events ---
@@ -418,8 +419,9 @@ def handle_child_dates_response(data):
 
 @socketio.on('parent_subscribe')
 def handle_parent_subscribe(data):
-    """Parent subscribes to a child's live location stream.
+    """Parent subscribes to one or more children's live location streams.
     data: { "childId": "...", "parentId": "..." (optional) }
+    Additive: calling multiple times with different childIds joins all rooms.
     """
     child_id = data.get('childId')
     parent_id = data.get('parentId')
@@ -431,20 +433,37 @@ def handle_parent_subscribe(data):
     if parent_id:
         join_room(f'parent_{parent_id}')
 
-    if sid in parent_subscriptions:
-        old_child = parent_subscriptions[sid]
-        leave_room(f'watch_{old_child}')
+    # Additive: initialise set if first subscription
+    if sid not in parent_subscriptions:
+        parent_subscriptions[sid] = set()
 
-    parent_subscriptions[sid] = child_id
+    parent_subscriptions[sid].add(child_id)
     join_room(f'watch_{child_id}')
 
     online = child_id in connected_children
     print(f'[WS] Parent {sid} subscribed to child {child_id} (online={online})')
-    print(f'[WS] Online children: {list(connected_children.keys())}')
+    print(f'[WS] Parent {sid} now watching: {parent_subscriptions[sid]}')
     if not online:
         print(f'[WS] WARNING: child {child_id!r} is NOT in connected_children')
 
     emit('subscribed', {'childId': child_id, 'online': online})
+
+
+@socketio.on('parent_unsubscribe_child')
+def handle_parent_unsubscribe_child(data):
+    """Parent unsubscribes from a single child's live feed.
+    data: { "childId": "..." }
+    """
+    child_id = data.get('childId')
+    if not child_id:
+        emit('error', {'message': 'Missing childId'})
+        return
+    sid = request.sid
+    if sid in parent_subscriptions:
+        parent_subscriptions[sid].discard(child_id)
+        leave_room(f'watch_{child_id}')
+        print(f'[WS] Parent {sid} unsubscribed from child {child_id}')
+    emit('unsubscribed_child', {'childId': child_id})
 
 
 @socketio.on('parent_request_history')
@@ -538,12 +557,13 @@ def handle_child_sync_batch(data):
 
 @socketio.on('parent_unsubscribe')
 def handle_parent_unsubscribe(data):
-    """Parent unsubscribes from a child's live feed."""
+    """Parent unsubscribes from ALL children's live feeds."""
     sid = request.sid
     if sid in parent_subscriptions:
-        child_id = parent_subscriptions.pop(sid)
-        leave_room(f'watch_{child_id}')
-        emit('unsubscribed', {'childId': child_id})
+        child_ids = parent_subscriptions.pop(sid)
+        for child_id in child_ids:
+            leave_room(f'watch_{child_id}')
+        emit('unsubscribed', {'childIds': list(child_ids)})
 
 
 if __name__ == '__main__':

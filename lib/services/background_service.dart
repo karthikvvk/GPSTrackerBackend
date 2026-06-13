@@ -104,6 +104,8 @@ class BackgroundService {
     
     bool isTracking = false;
     bool busy = false;
+    DateTime? lastEmitTime;
+    const minInterval = Duration(seconds: 3);
     StreamSubscription<Position>? positionSub;
 
     // Listen for commands
@@ -138,7 +140,7 @@ class BackgroundService {
     final settings = AndroidSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 0,
-      intervalDuration: const Duration(seconds: 1),
+      intervalDuration: const Duration(seconds: 3),
     );
 
     positionSub = Geolocator.getPositionStream(
@@ -146,20 +148,28 @@ class BackgroundService {
     ).listen((position) async {
       if (!isTracking || userId == null) return;
       if (busy) return;
+
+      // Timestamp gate: skip if fired sooner than minInterval
+      final now = DateTime.now().toUtc();
+      if (lastEmitTime != null && now.difference(lastEmitTime!) < minInterval) {
+        return;
+      }
+
       busy = true;
 
       try {
-        final now = DateTime.now().toUtc().toIso8601String();
+        final isoNow = now.toIso8601String();
         final coord = CoordinateLog(
           xCord: position.latitude,
           yCord: position.longitude,
-          loggedTime: now,
+          loggedTime: isoNow,
           userId: userId,
           synced: true,
         );
 
         // Save to local SQLite only (no server writes)
         await LocalDb.insertLog(coord);
+        lastEmitTime = now;
 
         // Update notification with latest position
         if (service is AndroidServiceInstance) {
@@ -174,7 +184,7 @@ class BackgroundService {
         service.invoke('update', {
           'latitude': position.latitude,
           'longitude': position.longitude,
-          'time': now,
+          'time': isoNow,
         });
       } catch (e) {
         if (kDebugMode) {

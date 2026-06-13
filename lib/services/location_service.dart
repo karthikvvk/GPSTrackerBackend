@@ -17,6 +17,10 @@ class LocationService {
   StreamSubscription<Position>? _positionSubscription;
   bool _isTracking = false;
   bool _busy = false;
+  DateTime? _lastEmitTime;
+
+  /// Minimum time between accepted GPS samples (3 s saves ~66% wake-ups)
+  static const _minInterval = Duration(seconds: 3);
 
   /// Callback for status updates
   void Function(String message)? onStatusUpdate;
@@ -67,12 +71,13 @@ class LocationService {
     if (!hasPermission) return;
 
     _isTracking = true;
-    _log('🔄 Started tracking...');
+    _lastEmitTime = null;
+    _log('🔄 Started tracking (3s interval)...');
 
     final settings = AndroidSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 0,
-      intervalDuration: const Duration(seconds: 1),
+      intervalDuration: _minInterval,
     );
 
     _positionSubscription = Geolocator.getPositionStream(
@@ -87,6 +92,7 @@ class LocationService {
   /// Stop tracking
   void stopTracking() {
     _isTracking = false;
+    _lastEmitTime = null;
     _positionSubscription?.cancel();
     _positionSubscription = null;
     _log('⏹️ Stopped tracking');
@@ -96,14 +102,21 @@ class LocationService {
   Future<void> _handlePosition(Position position) async {
     if (!_isTracking) return;
     if (_busy) return;
-    _busy = true;
 
+    // Timestamp gate: skip if we emitted less than _minInterval ago
+    final now = DateTime.now().toUtc();
+    if (_lastEmitTime != null &&
+        now.difference(_lastEmitTime!) < _minInterval) {
+      return;
+    }
+
+    _busy = true;
     try {
-      final now = DateTime.now().toUtc().toIso8601String();
+      final isoNow = now.toIso8601String();
       final coord = CoordinateLog(
         xCord: position.latitude,
         yCord: position.longitude,
-        loggedTime: now,
+        loggedTime: isoNow,
         userId: userId,
         synced: true,
       );
@@ -114,6 +127,7 @@ class LocationService {
       // 2. Push to relay for live streaming (lightweight, no server DB write)
       _relayService?.pushLocation(coord);
 
+      _lastEmitTime = now;
       _log(
           '📍 (${coord.xCord.toStringAsFixed(4)}, ${coord.yCord.toStringAsFixed(4)})');
 

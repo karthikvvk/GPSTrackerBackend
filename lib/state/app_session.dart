@@ -53,6 +53,15 @@ class AppSession extends ChangeNotifier {
   StreamSubscription? _syncBatchSub;
   final List<String> _trackingLogs = [];
 
+  /// Per-child online status map (childId -> online)
+  final Map<String, bool> _childOnlineMap = {};
+  Map<String, bool> get childOnlineMap => Map.unmodifiable(_childOnlineMap);
+
+  /// Returns true if the currently selected child is online.
+  bool get selectedChildOnline => _selectedChildId != null
+      ? (_childOnlineMap[_selectedChildId] ?? false)
+      : false;
+
   final _syncCompletedController = StreamController<void>.broadcast();
   Stream<void> get syncCompleted => _syncCompletedController.stream;
 
@@ -226,7 +235,7 @@ class AppSession extends ChangeNotifier {
     _liveLocationSub?.cancel();
     _childStatusSub?.cancel();
     _syncBatchSub?.cancel();
-    _relayService?.disconnect();
+    _relayService?.dispose();
     _relayService = null;
 
     await _authService.signOut(); // also clears linkedChildId/Name
@@ -241,6 +250,7 @@ class AppSession extends ChangeNotifier {
     _selectedChildId = null;
     _linkedChildName = null;
     _viewerName = 'You';
+    _childOnlineMap.clear();
     notifyListeners();
   }
 
@@ -339,13 +349,9 @@ class AppSession extends ChangeNotifier {
   // Parent Relay Methods
   // =========================================================================
 
-  /// Connect relay as parent, subscribe to live stream, and set up sync listener.
-  ///
-  /// FIX 1: Now passes childId directly to connect() so RelayService has it
-  /// from the start — no more null childId assert crash.
-  ///
-  /// FIX 2: Removed the incorrect subscribeToChild() call before connect().
-  /// The new connect() handles subscription internally via _onConnected().
+  /// Connect relay as parent and subscribe to live stream.
+  /// On first call, creates the relay and sets up stream listeners.
+  /// Subsequent calls (for additional children) just call subscribeToChild().
   Future<void> connectAsParent(String childId) async {
     if (_userId == null) return;
 
@@ -353,85 +359,109 @@ class AppSession extends ChangeNotifier {
     if (childId == _userId) {
       if (kDebugMode) {
         print('[AppSession] ❌ connectAsParent blocked: childId == own userId');
-        print(
-            '[AppSession]    This means _selectedChildId was never set correctly.');
-        print('[AppSession]    Call linkChild() before connectAsParent().');
       }
       return;
     }
 
-    // Idempotency guard
-    if (_selectedChildId == childId && (_relayService?.isConnected ?? false)) {
-      return;
-    }
+    final relayAlreadyConnected =
+        _relayService != null && _relayService!.isConnected;
 
-    // Tear down cleanly
-    _liveLocationSub?.cancel();
-    _childStatusSub?.cancel();
-    _syncBatchSub?.cancel();
-    _relayService?.disconnect();
-    _relayService = RelayService();
+    if (!relayAlreadyConnected) {
+      // First time — build and wire up the relay
+      _liveLocationSub?.cancel();
+      _childStatusSub?.cancel();
+      _syncBatchSub?.cancel();
+      _relayService?.dispose();
+      _relayService = RelayService();
 
-    // FIX 1+2: Pass childId directly to connect() — no subscribeToChild() before connect()
-    await _relayService!.connect(
-      userId: _userId!,
-      isChild: false,
-      childId: childId, // ← this was missing before, causing the assert crash
-    );
+      await _relayService!.connect(
+        userId: _userId!,
+        isChild: false,
+        childId: childId,
+      );
 
-    if (kDebugMode) {
-      print('[AppSession] connectAsParent: connected as parent');
-      print('[AppSession]   parentId = $_userId');
-      print('[AppSession]   childId  = $childId');
-    }
+      if (kDebugMode) {
+        print('[AppSession] connectAsParent: relay created');
+        print('[AppSession]   parentId = $_userId');
+        print('[AppSession]   first childId = $childId');
+      }
 
-    // Listen for live locations
-    _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
-      _lastLocation = coord;
-      notifyListeners();
-      LocalDb.insertLog(coord).catchError((e) {
-        if (kDebugMode) print('[AppSession] Failed to save relayed coord: $e');
-      });
-    });
-
-    // Listen for child online/offline status
-    _childStatusSub = _relayService!.childStatusStream.listen((online) {
-      _childOnline = online;
-      notifyListeners();
-    });
-
-    // Collect sync batches and flush to DB
-    _syncBatchSub = _relayService!.syncBatchStream.listen((batch) async {
-      final rawCoords = batch.coords;
-      final done = batch.done;
-
-      final coords = <CoordinateLog>[];
-      for (final raw in rawCoords) {
-        try {
-          coords.add(CoordinateLog(
-            xCord: (raw['x_cord'] as num).toDouble(),
-            yCord: (raw['y_cord'] as num).toDouble(),
-            loggedTime: raw['logged_time'] as String,
-            userId: childId,
-            synced: true,
-          ));
-        } catch (e) {
-          if (kDebugMode) print('[AppSession] Sync parse error: $e');
+      // Listen for live locations from ALL subscribed children
+      _liveLocationSub = _relayService!.liveLocationStream.listen((coord) {
+        _lastLocation = coord;
+        // Update per-child last location
+        if (coord.userId != null) {
+          updateChildLocation(coord.userId!, coord);
         }
-      }
-      if (coords.isNotEmpty) {
-        await LocalDb.insertLogsBatch(coords).catchError((e) {
-          if (kDebugMode) print('[AppSession] Sync batch insert error: $e');
+        notifyListeners();
+        LocalDb.insertLog(coord).catchError((e) {
+          if (kDebugMode) print('[AppSession] Failed to save relayed coord: $e');
         });
-        if (kDebugMode)
-          print('[AppSession] Batch inserted ${coords.length} records');
+      });
+
+      // Listen for child online/offline with per-child tracking
+      _childStatusSub = _relayService!.childStatusStream.listen((event) {
+        final cid = event['childId'] as String?;
+        final online = event['online'] as bool? ?? false;
+        if (cid != null) {
+          _childOnlineMap[cid] = online;
+        }
+        // Back-compat: update legacy bool for the selected child
+        if (cid == _selectedChildId) {
+          _childOnline = online;
+        }
+        notifyListeners();
+      });
+
+      // Collect sync batches and flush to DB
+      _syncBatchSub = _relayService!.syncBatchStream.listen((batch) async {
+        final rawCoords = batch.coords;
+        final done = batch.done;
+
+        final coords = <CoordinateLog>[];
+        for (final raw in rawCoords) {
+          try {
+            coords.add(CoordinateLog(
+              xCord: (raw['x_cord'] as num).toDouble(),
+              yCord: (raw['y_cord'] as num).toDouble(),
+              loggedTime: raw['logged_time'] as String,
+              userId: childId,
+              synced: true,
+            ));
+          } catch (e) {
+            if (kDebugMode) print('[AppSession] Sync parse error: $e');
+          }
+        }
+        if (coords.isNotEmpty) {
+          await LocalDb.insertLogsBatch(coords).catchError((e) {
+            if (kDebugMode) print('[AppSession] Sync batch insert error: $e');
+          });
+          if (kDebugMode) {
+            print('[AppSession] Batch inserted ${coords.length} records');
+          }
+        }
+        if (done) {
+          _syncCompletedController.add(null);
+          if (kDebugMode) print('[AppSession] Sync complete — notified listeners');
+        }
+      });
+    } else {
+      // Relay already running — just subscribe to the new child room
+      if (!_relayService!.watchedChildIds.contains(childId)) {
+        if (kDebugMode) {
+          print('[AppSession] connectAsParent: adding child $childId to existing relay');
+        }
+        _relayService!.subscribeToChild(childId);
       }
-      if (done) {
-        _syncCompletedController.add(null);
-        if (kDebugMode)
-          print('[AppSession] Sync complete — notified listeners');
-      }
-    });
+    }
+  }
+
+  /// Subscribe an additional child to the existing parent relay.
+  /// Call this after [connectAsParent] to track a second/third child
+  /// without rebuilding the socket.
+  Future<void> addChildToTracking(String childId) async {
+    if (_userId == null || childId == _userId) return;
+    await connectAsParent(childId); // handles both first and subsequent calls
   }
 
   Future<void> stopTracking() async {
@@ -457,6 +487,9 @@ class AppSession extends ChangeNotifier {
 
   void removeLinkedChild(String odemoId) {
     _linkedChildren.removeWhere((c) => c.odemoId == odemoId);
+    _childOnlineMap.remove(odemoId);
+    // Unsubscribe from the child's room without dropping other subscriptions
+    _relayService?.unsubscribeFromChild(odemoId);
     if (_selectedChildId == odemoId) {
       _selectedChildId =
           _linkedChildren.isNotEmpty ? _linkedChildren.first.odemoId : null;
@@ -491,9 +524,6 @@ class AppSession extends ChangeNotifier {
       if (kDebugMode) {
         print(
             '[AppSession] ❌ linkChild blocked: childUserId == own userId ($childUserId)');
-        print(
-            '[AppSession]    The parent tried to link themselves as the child.');
-        print('[AppSession]    Check the QR/email lookup result.');
       }
       return;
     }
@@ -511,13 +541,13 @@ class AppSession extends ChangeNotifier {
     }
     _selectedChildId = childUserId;
 
-    // FIX 3: Persist so it survives app restarts
+    // Persist so it survives app restarts
     _authService.saveLinkedChild(childUserId: childUserId, childName: trimmed);
 
     notifyListeners();
 
-    // Connect relay and kick off full sync
-    connectAsParent(childUserId);
+    // Additive: subscribe to this child without tearing down existing connections
+    addChildToTracking(childUserId);
   }
 
   Future<String?> lookupChildByEmail(String email) async {
@@ -541,35 +571,41 @@ class AppSession extends ChangeNotifier {
   Future<void> triggerSync() async {
     final childId = _selectedChildId;
 
-    // FIX 3: Guard against null _selectedChildId (happens after restart
-    // if linked child was not persisted)
     if (childId == null) {
-      if (kDebugMode)
+      if (kDebugMode) {
         print('[AppSession] triggerSync: no child selected — skipped');
+      }
       return;
     }
 
     if (childId == _userId) {
-      if (kDebugMode)
+      if (kDebugMode) {
         print('[AppSession] triggerSync: childId == own userId — skipped');
+      }
       return;
     }
 
     if (_relayService == null || !_relayService!.isConnected) {
-      if (kDebugMode)
+      if (kDebugMode) {
         print('[AppSession] triggerSync: relay not ready — connecting first');
+      }
       await connectAsParent(childId);
     }
 
-    _relayService?.requestSync(childId);
-    if (kDebugMode)
-      print('[AppSession] triggerSync: sync requested for $childId');
+    // Incremental sync: only pull records newer than what we already have.
+    final lastTimestamp = await LocalDb.getLastTimestamp(childId);
+    _relayService?.requestSync(childId, fromTimestamp: lastTimestamp);
+    if (kDebugMode) {
+      print('[AppSession] triggerSync: sync requested for $childId (from=$lastTimestamp)');
+    }
   }
 
   void unlinkChild() {
+    _relayService?.unsubscribeFromAll();
     _linkedChildName = null;
     _linkedChildren.clear();
     _selectedChildId = null;
+    _childOnlineMap.clear();
     _authService.clearLinkedChild();
     notifyListeners();
   }

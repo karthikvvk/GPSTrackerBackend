@@ -7,10 +7,12 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class RelayService {
   io.Socket? _socket;
-  String? _userId; // parent's own user_id
-  String? _childId; // the child we are tracking (parent mode only)
+  String? _userId; // current user's own id
   bool _isChild = false;
   bool _connected = false;
+
+  /// Parent mode: set of childIds currently being watched (multi-room)
+  final Set<String> _watchedChildIds = {};
 
   String? _pendingSyncChildId;
   String? _pendingSyncFromTimestamp;
@@ -20,8 +22,10 @@ class RelayService {
   Stream<CoordinateLog> get liveLocationStream =>
       _liveLocationController.stream;
 
-  final _childStatusController = StreamController<bool>.broadcast();
-  Stream<bool> get childStatusStream => _childStatusController.stream;
+  final _childStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  /// Emits `{ 'childId': String, 'online': bool }` maps.
+  Stream<Map<String, dynamic>> get childStatusStream =>
+      _childStatusController.stream;
 
   final _historyDataController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -38,6 +42,9 @@ class RelayService {
 
   bool get isConnected => _connected;
 
+  /// All currently watched child IDs (read-only view).
+  Set<String> get watchedChildIds => Set.unmodifiable(_watchedChildIds);
+
   // =========================================================================
   // Connection
   // =========================================================================
@@ -45,43 +52,39 @@ class RelayService {
   Future<void> connect({
     required String userId, // always the CURRENT user's id
     required bool isChild,
-    String? childId, // REQUIRED when isChild=false — the child to track
+    /// Deprecated for parent mode — use [subscribeToChild] after connect().
+    /// Still accepted for back-compat.
+    String? childId,
   }) async {
     _userId = userId;
     _isChild = isChild;
 
     // -----------------------------------------------------------------------
-    // GUARD: parent must always provide a childId that differs from their own
+    // GUARD: parent must never use their own id as childId
     // -----------------------------------------------------------------------
-    if (!isChild) {
-      assert(childId != null,
-          '[RelayService] childId must be provided in parent mode');
+    if (!isChild && childId != null) {
       assert(
           childId != userId,
           '[RelayService] BUG: childId == userId ($userId). '
           'You are passing the parent\'s own id as childId. '
           'Pass the looked-up child\'s user_id instead.');
 
-      if (childId == null || childId == userId) {
+      if (childId == userId) {
         if (kDebugMode) {
           print(
-              '[RelayService] ❌ BLOCKED connect: childId is null or equals own userId');
-          print('[RelayService]    userId  (parent) = $userId');
-          print('[RelayService]    childId (target) = $childId');
-          print(
-              '[RelayService]    Fix: pass the child\'s user_id from /auth/lookup');
+              '[RelayService] ❌ BLOCKED connect: childId equals own userId');
         }
-        return; // abort — do not connect with wrong ids
+        return;
       }
-
-      _childId = childId;
+      // Queue this child to be subscribed once connected
+      _watchedChildIds.add(childId);
     }
 
     if (kDebugMode) {
       print('[RelayService] Connecting...');
       print('[RelayService]   role    = ${isChild ? "CHILD" : "PARENT"}');
       print('[RelayService]   userId  = $userId');
-      if (!isChild) print('[RelayService]   childId = $_childId');
+      if (!isChild) print('[RelayService]   watchedChildren = $_watchedChildIds');
     }
 
     final settings = await Settings.instance;
@@ -135,7 +138,10 @@ class RelayService {
     if (_isChild) {
       _registerAsChild();
     } else {
-      _subscribeNow();
+      // Re-subscribe to ALL watched children (handles reconnects)
+      for (final cid in _watchedChildIds) {
+        _emitSubscribe(cid);
+      }
       // Fire pending sync if queued
       if (_pendingSyncChildId != null) {
         _emitSync(_pendingSyncChildId!, _pendingSyncFromTimestamp);
@@ -151,7 +157,7 @@ class RelayService {
     _socket = null;
     _connected = false;
     _userId = null;
-    _childId = null;
+    _watchedChildIds.clear();
   }
 
   // =========================================================================
@@ -215,8 +221,9 @@ class RelayService {
         });
         await Future.delayed(const Duration(milliseconds: 10));
       }
-      if (kDebugMode)
+      if (kDebugMode) {
         print('[RelayService] Sync complete: ${logs.length} records sent');
+      }
     });
   }
 
@@ -234,13 +241,38 @@ class RelayService {
   // Parent Mode
   // =========================================================================
 
-  void _subscribeNow() {
-    if (_childId == null) return;
+  void _emitSubscribe(String childId) {
     if (kDebugMode) {
-      print('[RelayService] Subscribing to child: $_childId');
+      print('[RelayService] Subscribing to child: $childId');
       print('[RelayService]   (parent userId=$_userId)');
     }
-    _socket!.emit('parent_subscribe', {'childId': _childId});
+    _socket!.emit('parent_subscribe', {'childId': childId});
+  }
+
+  /// Subscribe to an additional child (additive — does not drop existing subs).
+  void subscribeToChild(String childId) {
+    assert(childId != _userId,
+        '[RelayService] BUG: trying to subscribe to own userId as child');
+    if (childId == _userId) return;
+    _watchedChildIds.add(childId);
+    if (_connected && _socket != null) {
+      _emitSubscribe(childId);
+    }
+  }
+
+  /// Remove a single child subscription without affecting others.
+  void unsubscribeFromChild(String childId) {
+    _watchedChildIds.remove(childId);
+    if (!_connected || _socket == null) return;
+    _socket!.emit('parent_unsubscribe_child', {'childId': childId});
+  }
+
+  /// Unsubscribe from ALL children and clear the watch set.
+  void unsubscribeFromAll() {
+    if (_connected && _socket != null) {
+      _socket!.emit('parent_unsubscribe', {});
+    }
+    _watchedChildIds.clear();
   }
 
   void _setupParentListeners() {
@@ -256,20 +288,24 @@ class RelayService {
     });
 
     _socket?.on('child_online', (data) {
-      if (kDebugMode) print('[RelayService] Child online: ${data['childId']}');
-      _childStatusController.add(true);
+      final childId = data['childId'] as String?;
+      if (kDebugMode) print('[RelayService] Child online: $childId');
+      _childStatusController.add({'childId': childId, 'online': true});
     });
 
     _socket?.on('child_offline', (data) {
-      if (kDebugMode) print('[RelayService] Child offline: ${data['childId']}');
-      _childStatusController.add(false);
+      final childId = data['childId'] as String?;
+      if (kDebugMode) print('[RelayService] Child offline: $childId');
+      _childStatusController.add({'childId': childId, 'online': false});
     });
 
     _socket?.on('subscribed', (data) {
+      final childId = data['childId'] as String?;
       final online = data['online'] as bool;
-      if (kDebugMode)
-        print('[RelayService] Subscribed confirmed, child online=$online');
-      _childStatusController.add(online);
+      if (kDebugMode) {
+        print('[RelayService] Subscribed confirmed: childId=$childId, online=$online');
+      }
+      _childStatusController.add({'childId': childId, 'online': online});
     });
 
     _socket?.on('history_data', (data) {
@@ -285,31 +321,17 @@ class RelayService {
       final rawCoords = data['coords'] as List? ?? [];
       final coords = rawCoords.cast<Map<String, dynamic>>();
       final done = data['done'] as bool? ?? false;
-      if (kDebugMode)
+      if (kDebugMode) {
         print(
             '[RelayService] sync_batch: ${coords.length} records, done=$done');
+      }
       _syncBatchController.add((coords: coords, done: done));
     });
   }
 
   // =========================================================================
-  // Parent Public API
+  // Parent Public API (back-compat)
   // =========================================================================
-
-  /// Subscribe to a different child (hot-swap).
-  void subscribeToChild(String newChildId) {
-    assert(newChildId != _userId,
-        '[RelayService] BUG: trying to subscribe to own userId as child');
-    _childId = newChildId;
-    if (_connected && _socket != null) {
-      _subscribeNow();
-    }
-  }
-
-  void unsubscribeFromChild() {
-    if (!_connected || _socket == null) return;
-    _socket!.emit('parent_unsubscribe', {});
-  }
 
   void requestHistory(String childId, String date) {
     if (!_connected || _socket == null) return;
@@ -322,9 +344,10 @@ class RelayService {
   }
 
   void requestSync(String childId, {String? fromTimestamp}) {
-    if (kDebugMode)
+    if (kDebugMode) {
       print(
           '[RelayService] requestSync connected=$_connected from=$fromTimestamp');
+    }
     if (!_connected || _socket == null) {
       _pendingSyncChildId = childId;
       _pendingSyncFromTimestamp = fromTimestamp;
