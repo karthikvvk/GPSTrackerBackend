@@ -120,9 +120,8 @@ class ProfilePage extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.lg),
           ],
-          // Linked account section for Parent (parent) users
           if (!session.isChild) ...[
-            Text('Linked account',
+            Text('Linked children',
                 style: context.textStyles.titleLarge
                     ?.copyWith(color: scheme.onSurface)),
             const SizedBox(height: AppSpacing.sm),
@@ -137,60 +136,80 @@ class ProfilePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: scheme.primary.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(AppRadius.md),
-                        ),
-                        child: Icon(Icons.link_rounded, color: scheme.primary),
+                  // --- Per-child list ---
+                  if (session.linkedChildren.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                      child: Row(
+                        children: [
+                          Icon(Icons.person_search_rounded,
+                              size: 20, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(
+                            'No children linked yet',
+                            style: context.textStyles.bodyMedium
+                                ?.copyWith(color: scheme.onSurfaceVariant),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              session.hasLinkedChild
-                                  ? 'Viewing ${session.linkedChildName}'
-                                  : 'Viewing You',
-                              style: context.textStyles.titleMedium
-                                  ?.copyWith(color: scheme.onSurface),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Dashboard uses this account for live and history.',
-                              style: context.textStyles.bodySmall
-                                  ?.copyWith(color: scheme.onSurfaceVariant),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  Wrap(
-                    spacing: AppSpacing.md,
-                    runSpacing: AppSpacing.sm,
-                    children: [
-                      SubtleOutlineButton(
-                        label: 'Link Account',
-                        icon: Icons.person_add_alt_1_rounded,
-                        onPressed: session.hasLinkedChild
-                            ? null
-                            : () => context.go(AppRoutes.linkAccount),
-                      ),
-                      SubtleOutlineButton(
-                        label: 'Unlink',
-                        icon: Icons.link_off_rounded,
-                        onPressed: session.hasLinkedChild
-                            ? () => context.read<AppSession>().unlinkChild()
-                            : null,
-                      ),
-                    ],
+                    )
+                  else
+                    ...session.linkedChildren.map((child) => Padding(
+                          padding:
+                              const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color:
+                                      scheme.primary.withValues(alpha: 0.10),
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadius.md),
+                                ),
+                                child: Icon(Icons.person_rounded,
+                                    size: 18, color: scheme.primary),
+                              ),
+                              const SizedBox(width: AppSpacing.sm),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      child.displayName,
+                                      style: context.textStyles.titleSmall
+                                          ?.copyWith(
+                                              color: scheme.onSurface),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      child.email,
+                                      style: context.textStyles.bodySmall
+                                          ?.copyWith(
+                                              color: scheme.onSurfaceVariant),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.link_off_rounded,
+                                    size: 20, color: scheme.error),
+                                tooltip: 'Unlink',
+                                onPressed: () => context
+                                    .read<AppSession>()
+                                    .unlinkChildById(child.odemoId),
+                              ),
+                            ],
+                          ),
+                        )),
+                  const Divider(height: AppSpacing.md),
+                  // --- Always-active Link Account button ---
+                  SubtleOutlineButton(
+                    label: 'Link Account',
+                    icon: Icons.person_add_alt_1_rounded,
+                    onPressed: () => context.go(AppRoutes.linkAccount),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   Text(

@@ -386,7 +386,7 @@ def handle_child_location_update(data):
         'childId': user_id,
         'x_cord': data.get('x_cord'),
         'y_cord': data.get('y_cord'),
-        'logged_time': data.get('logged_time'),
+        'ts': data.get('ts'),   # epoch-ms integer (13 bytes vs 27 for ISO)
     }, room=f'watch_{user_id}', include_self=False)
 
 

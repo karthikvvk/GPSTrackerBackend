@@ -122,23 +122,20 @@ class AppSession extends ChangeNotifier {
         _role = roleStr == 'child' ? UserRole.child : UserRole.parent;
       }
 
-      // FIX 3: Restore linked child from persisted storage so pages
-      // that call triggerSync() on load don't crash with null _selectedChildId.
-      final linkedChildId = _authService.linkedChildId;
-      final linkedChildName = _authService.linkedChildName;
-      if (linkedChildId != null && linkedChildName != null) {
-        _selectedChildId = linkedChildId;
-        _linkedChildName = linkedChildName;
-        _linkedChildren = [
-          LinkedChild(
-            odemoId: linkedChildId,
-            displayName: linkedChildName,
-            email: linkedChildName,
-          )
-        ];
+      // Restore ALL linked children from persisted list.
+      final persisted = _authService.linkedChildren;
+      if (persisted.isNotEmpty) {
+        _linkedChildren = persisted
+            .map((m) => LinkedChild(
+                  odemoId: m['id']!,
+                  displayName: m['name']!,
+                  email: m['name']!,
+                ))
+            .toList();
+        _selectedChildId = _linkedChildren.first.odemoId;
+        _linkedChildName = _linkedChildren.first.displayName;
         if (kDebugMode) {
-          print(
-              '[AppSession] Restored linked child: $linkedChildId ($linkedChildName)');
+          print('[AppSession] Restored ${_linkedChildren.length} linked child(ren)');
         }
       }
 
@@ -600,13 +597,30 @@ class AppSession extends ChangeNotifier {
     }
   }
 
+  /// Unlink a single child by their userId. Keeps all other children linked.
+  void unlinkChildById(String odemoId) {
+    _relayService?.unsubscribeFromChild(odemoId);
+    _linkedChildren.removeWhere((c) => c.odemoId == odemoId);
+    _childOnlineMap.remove(odemoId);
+    if (_selectedChildId == odemoId) {
+      _selectedChildId =
+          _linkedChildren.isNotEmpty ? _linkedChildren.first.odemoId : null;
+      _linkedChildName = _linkedChildren.isNotEmpty
+          ? _linkedChildren.first.displayName
+          : null;
+    }
+    _authService.clearLinkedChild(odemoId);
+    notifyListeners();
+  }
+
+  /// Unlink ALL children at once.
   void unlinkChild() {
     _relayService?.unsubscribeFromAll();
     _linkedChildName = null;
     _linkedChildren.clear();
     _selectedChildId = null;
     _childOnlineMap.clear();
-    _authService.clearLinkedChild();
+    _authService.clearAllLinkedChildren();
     notifyListeners();
   }
 

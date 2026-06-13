@@ -12,16 +12,20 @@ class AuthService {
   static const String _keyDisplayName = 'user_display_name';
   static const String _keyRole = 'user_role';
 
-  // FIX 3: Keys for persisting the linked child across restarts
+  // Legacy single-child keys (read-only for one-time migration)
   static const String _keyLinkedChildId = 'linked_child_id';
   static const String _keyLinkedChildName = 'linked_child_name';
+
+  // Multi-child list key — source of truth: JSON array [{"id":"...","name":"..."},...]
+  static const String _keyLinkedChildrenList = 'linked_children_list';
 
   String? _userId;
   String? _email;
   String? _displayName;
   String? _role;
-  String? _linkedChildId;
-  String? _linkedChildName;
+
+  // In-memory multi-child list [{"id":"...","name":"..."},...].
+  List<Map<String, String>> _linkedChildrenList = [];
 
   AuthService();
 
@@ -31,8 +35,24 @@ class AuthService {
     _email = _prefs?.getString(_keyEmail);
     _displayName = _prefs?.getString(_keyDisplayName);
     _role = _prefs?.getString(_keyRole);
-    _linkedChildId = _prefs?.getString(_keyLinkedChildId);
-    _linkedChildName = _prefs?.getString(_keyLinkedChildName);
+
+    // Load multi-child list from SharedPrefs.
+    final raw = _prefs?.getString(_keyLinkedChildrenList);
+    if (raw != null && raw.isNotEmpty) {
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      _linkedChildrenList = decoded
+          .cast<Map<String, dynamic>>()
+          .map((m) => {'id': m['id'] as String, 'name': m['name'] as String})
+          .toList();
+    } else {
+      // One-time migration from legacy single-child keys.
+      final legacyId = _prefs?.getString(_keyLinkedChildId);
+      final legacyName = _prefs?.getString(_keyLinkedChildName);
+      if (legacyId != null && legacyName != null) {
+        _linkedChildrenList = [{'id': legacyId, 'name': legacyName}];
+        await _persistChildrenList();
+      }
+    }
   }
 
   String? get userId => _userId;
@@ -41,9 +61,15 @@ class AuthService {
   String? get role => _role;
   bool get isSignedIn => _userId != null;
 
-  // FIX 3: Expose persisted linked child to AppSession on restore
-  String? get linkedChildId => _linkedChildId;
-  String? get linkedChildName => _linkedChildName;
+  /// All persisted linked children as [{"id":"...","name":"..."},...] maps.
+  List<Map<String, String>> get linkedChildren =>
+      List.unmodifiable(_linkedChildrenList);
+
+  // Legacy getters kept for any callers that still use single-child API.
+  String? get linkedChildId =>
+      _linkedChildrenList.isNotEmpty ? _linkedChildrenList.first['id'] : null;
+  String? get linkedChildName =>
+      _linkedChildrenList.isNotEmpty ? _linkedChildrenList.first['name'] : null;
 
   // ---------------------------------------------------------------------------
   // Register
@@ -135,26 +161,38 @@ class AuthService {
   }
 
   // ---------------------------------------------------------------------------
-  // FIX 3: Save / clear linked child
+  // Save / clear linked children (multi-child list)
   // ---------------------------------------------------------------------------
 
-  /// Persist the linked child's ID and display name so it survives app restarts.
+  /// Upsert a child into the persisted list. Safe to call multiple times.
   Future<void> saveLinkedChild({
     required String childUserId,
     required String childName,
   }) async {
-    _linkedChildId = childUserId;
-    _linkedChildName = childName;
-    await _prefs?.setString(_keyLinkedChildId, childUserId);
-    await _prefs?.setString(_keyLinkedChildName, childName);
+    // Upsert: remove existing entry with same id, then append.
+    _linkedChildrenList.removeWhere((m) => m['id'] == childUserId);
+    _linkedChildrenList.add({'id': childUserId, 'name': childName});
+    await _persistChildrenList();
   }
 
-  /// Clear the persisted linked child (called on unlink or sign out).
-  Future<void> clearLinkedChild() async {
-    _linkedChildId = null;
-    _linkedChildName = null;
+  /// Remove a single child from the persisted list.
+  Future<void> clearLinkedChild(String childUserId) async {
+    _linkedChildrenList.removeWhere((m) => m['id'] == childUserId);
+    await _persistChildrenList();
+  }
+
+  /// Remove all linked children (called on sign-out).
+  Future<void> clearAllLinkedChildren() async {
+    _linkedChildrenList.clear();
+    await _prefs?.remove(_keyLinkedChildrenList);
+    // Also clear legacy keys.
     await _prefs?.remove(_keyLinkedChildId);
     await _prefs?.remove(_keyLinkedChildName);
+  }
+
+  Future<void> _persistChildrenList() async {
+    final encoded = jsonEncode(_linkedChildrenList);
+    await _prefs?.setString(_keyLinkedChildrenList, encoded);
   }
 
   // ---------------------------------------------------------------------------
@@ -166,14 +204,11 @@ class AuthService {
     _email = null;
     _displayName = null;
     _role = null;
-    _linkedChildId = null;
-    _linkedChildName = null;
     await _prefs?.remove(_keyUserId);
     await _prefs?.remove(_keyEmail);
     await _prefs?.remove(_keyDisplayName);
     await _prefs?.remove(_keyRole);
-    await _prefs?.remove(_keyLinkedChildId);
-    await _prefs?.remove(_keyLinkedChildName);
+    await clearAllLinkedChildren();
   }
 
   // ---------------------------------------------------------------------------

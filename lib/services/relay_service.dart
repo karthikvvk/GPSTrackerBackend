@@ -233,7 +233,8 @@ class RelayService {
       'userId': _userId,
       'x_cord': coord.xCord,
       'y_cord': coord.yCord,
-      'logged_time': coord.loggedTime,
+      // Send epoch-ms integer instead of ISO string: 13 bytes vs 27 bytes.
+      'ts': DateTime.parse(coord.loggedTime).millisecondsSinceEpoch,
     });
   }
 
@@ -277,10 +278,15 @@ class RelayService {
 
   void _setupParentListeners() {
     _socket?.on('live_location', (data) {
+      // Convert epoch-ms integer back to ISO string for DB storage.
+      final tsMs = (data['ts'] as num).toInt();
+      final loggedTime =
+          DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true)
+              .toIso8601String();
       final coord = CoordinateLog(
         xCord: (data['x_cord'] as num).toDouble(),
         yCord: (data['y_cord'] as num).toDouble(),
-        loggedTime: data['logged_time'] as String,
+        loggedTime: loggedTime,
         userId: data['childId'] as String?,
         synced: true,
       );
