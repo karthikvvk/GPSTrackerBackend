@@ -94,6 +94,7 @@ class RelayService {
       'transports': ['websocket'],
       'autoConnect': false,
       'forceNew': true,
+      'path': '/socket.io',       // explicit — prevents port-0 from URL mis-parse
       'connectTimeout': 60000,
       'timeout': 60000,
       'reconnection': true,

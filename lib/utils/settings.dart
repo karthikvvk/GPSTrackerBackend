@@ -33,7 +33,13 @@ class Settings {
   //   Physical device on same WiFi → "http://192.168.0.101:5000"
   //   Emulator                     → "http://10.0.2.2:5000"
   //   Production (Render)          → "https://gpstrackerbackend-1.onrender.com"
-  String get backendUrl => _settings?['backend_url'] ?? 'http://localhost:5000';
+  //
+  // IMPORTANT: Do NOT include a trailing slash in settings.json.
+  // The getter strips one defensively to avoid port-0 bugs in socket.io client.
+  String get backendUrl {
+    final raw = (_settings?['backend_url'] as String?) ?? 'http://localhost:5000';
+    return raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
+  }
   String get mongoUri => _settings?['mongo_uri'] ?? '';
   String get dbName => _settings?['db_name'] ?? 'GPSTracker';
   bool get debugMode => _settings?['debug_mode'] ?? false;
